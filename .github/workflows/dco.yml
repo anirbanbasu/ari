@@ -1,8 +1,7 @@
-name: Enforce DCO Sign-off
+name: DCO sign-off
 
 on:
   pull_request:
-  push:
 
 jobs:
   check:
