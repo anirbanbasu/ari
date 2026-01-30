@@ -3,7 +3,7 @@ Recursive Internetwork Architecture (RINA) implementation in Rust.
 
 ## License
 
-Copyright © 2026-present The RINA (Rust) Contributors
+Copyright © 2026-present RINA (Rust) Contributors
 
 This project is licensed under the **European Union Public Licence, Version 1.2** (the "EUPL"). 
 

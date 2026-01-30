@@ -5,3 +5,5 @@ edition = "2024"
 license = "EUPL-1.2-or-later"
 
 [dependencies]
+tokio = { version = "1.42", features = ["full"] }
+tokio-util = "0.7"
