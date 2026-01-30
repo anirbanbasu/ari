@@ -1,0 +1,11 @@
+name: Enforce DCO Sign-off
+
+on:
+  pull_request:
+  push:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: KineticCafe/actions-dco@v2.1.1
