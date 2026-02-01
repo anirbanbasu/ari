@@ -1,9 +1,11 @@
-# RINA (Rust)
-Recursive Internetwork Architecture (RINA) implementation in Rust.
+# ARI
+ARI -- _A RINA Implementation_ is a Rust implementation of the [Recursive Internetwork Architecture (RINA)](https://en.wikipedia.org/wiki/Recursive_Internetwork_Architecture).
+
+The acronym 'ARI' is intentionally chosen to reflect both an expanded 'A RINA Implementation' and imply the similarities between networking and ant colonies where the Japanese word for ant, [蟻](https://jisho.org/search/%E8%9F%BB) or mostly written as アリ, is pronounced as 'ari'.
 
 ## License
 
-Copyright © 2026-present RINA (Rust) Contributors
+Copyright © 2026-present ARI Contributors
 
 This project is licensed under the **European Union Public Licence, Version 1.2** (the "EUPL"). 
 

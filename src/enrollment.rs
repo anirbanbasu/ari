@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2-or-later
-// Copyright © 2026-present RINA (Rust) Contributors
+// Copyright © 2026-present ARI Contributors
 
 //! IPCP Enrollment
 //!

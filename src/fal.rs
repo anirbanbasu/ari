@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: EUPL-1.2-or-later
-// Copyright © 2026-present RINA (Rust) Contributors
+// Copyright © 2026-present ARI Contributors
 
 //! Flow Allocator (FAL)
 //!
@@ -165,14 +165,16 @@ impl FlowAllocator {
             }
             Ok(())
         } else {
-            Err(response.error.unwrap_or_else(|| "Unknown error".to_string()))
+            Err(response
+                .error
+                .unwrap_or_else(|| "Unknown error".to_string()))
         }
     }
 
     /// Deallocates a flow
     pub fn deallocate_flow(&self, flow_id: u32) -> Result<(), String> {
         let mut flows = self.flows.write().unwrap();
-        
+
         if let Some(flow) = flows.get_mut(&flow_id) {
             flow.state = FlowState::Deallocated;
             flows.remove(&flow_id);
@@ -214,7 +216,7 @@ mod tests {
     #[test]
     fn test_fal_create_request() {
         let fal = FlowAllocator::new();
-        
+
         let request = fal.create_request(
             "app1".to_string(),
             "app2".to_string(),
@@ -222,7 +224,7 @@ mod tests {
             2000,
             FlowConfig::default(),
         );
-        
+
         assert_eq!(request.request_id, 1);
         assert_eq!(fal.pending_count(), 1);
     }
@@ -230,7 +232,7 @@ mod tests {
     #[test]
     fn test_fal_process_request() {
         let fal = FlowAllocator::new();
-        
+
         let request = FlowAllocRequest {
             src_app_name: "app1".to_string(),
             dst_app_name: "app2".to_string(),
@@ -239,9 +241,9 @@ mod tests {
             qos: FlowConfig::default(),
             request_id: 1,
         };
-        
+
         let response = fal.process_request(request);
-        
+
         assert!(response.success);
         assert_eq!(response.flow_id, Some(1));
         assert_eq!(fal.flow_count(), 1);
@@ -250,7 +252,7 @@ mod tests {
     #[test]
     fn test_fal_deallocate_flow() {
         let fal = FlowAllocator::new();
-        
+
         let request = FlowAllocRequest {
             src_app_name: "app1".to_string(),
             dst_app_name: "app2".to_string(),
@@ -259,10 +261,10 @@ mod tests {
             qos: FlowConfig::default(),
             request_id: 1,
         };
-        
+
         let response = fal.process_request(request);
         let flow_id = response.flow_id.unwrap();
-        
+
         assert!(fal.deallocate_flow(flow_id).is_ok());
         assert_eq!(fal.flow_count(), 0);
     }
@@ -270,7 +272,7 @@ mod tests {
     #[test]
     fn test_fal_get_flow() {
         let fal = FlowAllocator::new();
-        
+
         let request = FlowAllocRequest {
             src_app_name: "app1".to_string(),
             dst_app_name: "app2".to_string(),
@@ -279,10 +281,10 @@ mod tests {
             qos: FlowConfig::default(),
             request_id: 1,
         };
-        
+
         let response = fal.process_request(request);
         let flow_id = response.flow_id.unwrap();
-        
+
         let flow = fal.get_flow(flow_id);
         assert!(flow.is_some());
         assert_eq!(flow.unwrap().src_app_name, "app1");

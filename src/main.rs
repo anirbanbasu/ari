@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2-or-later
-// Copyright © 2026-present RINA (Rust) Contributors
+// Copyright © 2026-present ARI Contributors
 
-use rina_rust::{
+use ari::{
     Dif, Directory, EfcpActor, EfcpHandle, EfcpMessage, EnrollmentManager, FlowAllocator,
     FlowConfig, ForwardingEntry, IpcProcess, IpcpState, PriorityScheduling, RibActor, RibHandle,
     RibMessage, RibValue, RmtActor, RmtHandle, RmtMessage, RoutingPolicy, ShimActor, ShimHandle,
@@ -299,7 +299,7 @@ async fn main() {
 
     // === Enrollment Manager ===
     println!("=== 8. Enrollment Manager ===");
-    let rib = rina_rust::Rib::new();
+    let rib = ari::Rib::new();
     let mut em = EnrollmentManager::new(rib);
     let enroll_req = em.initiate_enrollment("ipcp-1".to_string(), "test-dif".to_string(), 1001);
     println!("  Initiated enrollment for {}", enroll_req.ipcp_name);

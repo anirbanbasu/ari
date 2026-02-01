@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2-or-later
-// Copyright © 2026-present RINA (Rust) Contributors
+// Copyright © 2026-present ARI Contributors
 
-//! The core library for the RINA (Rust) implementation.
+//! The core library for the ARI implementation.
 //!
 //! This crate will contain the main logic for implementing the
 //! Recursive InterNetwork Architecture, including concepts like
