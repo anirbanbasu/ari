@@ -6,11 +6,59 @@ use ari::{
     FlowConfig, ForwardingEntry, IpcProcess, IpcpState, PriorityScheduling, RibActor, RibHandle,
     RibMessage, RibValue, RmtActor, RmtHandle, RmtMessage, RoutingPolicy, ShimActor, ShimHandle,
     ShimMessage, ShortestPathRouting,
+    config::{CliArgs, IpcpConfiguration, IpcpMode},
 };
+use clap::Parser;
 use tokio::sync::mpsc;
 
 #[tokio::main]
 async fn main() {
+    // Parse command-line arguments
+    let args = CliArgs::parse();
+
+    // Load configuration from CLI args or config file
+    let config = match IpcpConfiguration::from_cli(args) {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            eprintln!("Configuration error: {}", e);
+            eprintln!("\nUsage examples:");
+            eprintln!("  Demo mode:");
+            eprintln!("    cargo run");
+            eprintln!("    cargo run -- --mode demo");
+            eprintln!("\n  Bootstrap mode:");
+            eprintln!(
+                "    cargo run -- --mode bootstrap --name ipcp-a --dif-name test-dif --address 1001 --bind 0.0.0.0:7000"
+            );
+            eprintln!("\n  Member mode:");
+            eprintln!(
+                "    cargo run -- --mode member --name ipcp-b --dif-name test-dif --bind 0.0.0.0:7001 --bootstrap-peers 127.0.0.1:7000"
+            );
+            eprintln!("\n  From config file:");
+            eprintln!("    cargo run -- --config config/bootstrap.toml");
+            eprintln!("    cargo run -- --config config/member.toml");
+            std::process::exit(1);
+        }
+    };
+
+    // Validate configuration
+    if let Err(e) = config.validate() {
+        eprintln!("Configuration validation error: {}", e);
+        std::process::exit(1);
+    }
+
+    // Print configuration summary
+    config.print_summary();
+
+    // Run appropriate mode
+    match config.mode {
+        IpcpMode::Demo => run_demo_mode().await,
+        IpcpMode::Bootstrap => run_bootstrap_mode(config).await,
+        IpcpMode::Member => run_member_mode(config).await,
+    }
+}
+
+/// Runs the original demo mode
+async fn run_demo_mode() {
     println!("=== RINA (Recursive InterNetwork Architecture) ===");
     println!("=== Enhanced with Modular Extensions ===\n");
     println!("Initializing a new Distributed IPC Facility (DIF).\n");
@@ -363,4 +411,224 @@ async fn main() {
 
     // Keep the main task alive for a moment
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+}
+
+/// Runs bootstrap IPCP mode
+async fn run_bootstrap_mode(config: IpcpConfiguration) {
+    println!("=== RINA Bootstrap IPCP ===\n");
+
+    let local_addr = config.address.expect("Bootstrap mode requires an address");
+
+    // Spawn actor tasks
+    println!("✓ Spawning RINA component actors...\n");
+
+    // RIB Actor
+    let (rib_tx, rib_rx) = mpsc::channel(32);
+    let rib_handle = RibHandle::new(rib_tx);
+    tokio::spawn(async move {
+        let actor = RibActor::new(rib_rx);
+        actor.run().await;
+    });
+    println!("  → RIB Actor spawned");
+
+    // EFCP Actor
+    let (efcp_tx, efcp_rx) = mpsc::channel(32);
+    let _efcp_handle = EfcpHandle::new(efcp_tx);
+    tokio::spawn(async move {
+        let actor = EfcpActor::new(efcp_rx);
+        actor.run().await;
+    });
+    println!("  → EFCP Actor spawned");
+
+    // RMT Actor
+    let (rmt_tx, rmt_rx) = mpsc::channel(32);
+    let _rmt_handle = RmtHandle::new(rmt_tx);
+    tokio::spawn(async move {
+        let actor = RmtActor::new(local_addr, rmt_rx);
+        actor.run().await;
+    });
+    println!("  → RMT Actor spawned");
+
+    // Shim Actor
+    let (shim_tx, shim_rx) = mpsc::channel(32);
+    let shim_handle = ShimHandle::new(shim_tx);
+    tokio::spawn(async move {
+        let actor = ShimActor::new(local_addr, shim_rx);
+        actor.run().await;
+    });
+    println!("  → Shim Actor spawned\n");
+
+    // Create IPCP
+    let mut ipcp = IpcProcess::with_name_and_address(config.name.clone(), local_addr);
+    ipcp.set_dif_name(config.dif_name.clone());
+    ipcp.set_state(IpcpState::Operational);
+
+    println!("✓ Created Bootstrap IPCP: {}", config.name);
+    println!("  RINA Address: {}", local_addr);
+    println!("  DIF: {}", config.dif_name);
+
+    // Bind shim layer to UDP socket
+    println!("\n✓ Binding to UDP socket...");
+    let (resp_tx, mut resp_rx) = mpsc::channel(1);
+    shim_handle
+        .send(ShimMessage::Bind {
+            addr: config.bind_address.clone(),
+            response: resp_tx,
+        })
+        .await
+        .unwrap();
+
+    match resp_rx.recv().await.unwrap() {
+        Ok(_) => {
+            let (resp_tx, mut resp_rx) = mpsc::channel(1);
+            shim_handle
+                .send(ShimMessage::GetLocalAddr { response: resp_tx })
+                .await
+                .unwrap();
+
+            if let Ok(addr) = resp_rx.recv().await.unwrap() {
+                println!("  Bound to: {}", addr);
+            }
+        }
+        Err(e) => {
+            eprintln!("  Failed to bind: {}", e);
+            return;
+        }
+    }
+
+    // Initialize RIB with address pool
+    println!("\n✓ Initializing address pool...");
+    for addr in config.address_pool_start..=config.address_pool_end {
+        let (resp_tx, mut resp_rx) = mpsc::channel(1);
+        rib_handle
+            .send(RibMessage::Create {
+                name: format!("address-pool/{}", addr),
+                class: "address-pool".to_string(),
+                value: RibValue::Boolean(true), // true = available
+                response: resp_tx,
+            })
+            .await
+            .unwrap();
+        let _ = resp_rx.recv().await.unwrap();
+    }
+    println!(
+        "  Address pool: {}-{}",
+        config.address_pool_start, config.address_pool_end
+    );
+
+    println!("\n🎉 Bootstrap IPCP operational!");
+    println!("   Waiting for enrollment requests from member IPCPs...\n");
+
+    // Keep running
+    loop {
+        tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+        println!("  [Bootstrap IPCP running]");
+    }
+}
+
+/// Runs member IPCP mode
+async fn run_member_mode(config: IpcpConfiguration) {
+    println!("=== RINA Member IPCP ===\n");
+
+    // Member starts without a RINA address (will get one during enrollment)
+    let local_addr = 0; // Placeholder until enrollment
+
+    // Spawn actor tasks
+    println!("✓ Spawning RINA component actors...\n");
+
+    // RIB Actor
+    let (rib_tx, rib_rx) = mpsc::channel(32);
+    let _rib_handle = RibHandle::new(rib_tx);
+    tokio::spawn(async move {
+        let actor = RibActor::new(rib_rx);
+        actor.run().await;
+    });
+    println!("  → RIB Actor spawned");
+
+    // EFCP Actor
+    let (efcp_tx, efcp_rx) = mpsc::channel(32);
+    let _efcp_handle = EfcpHandle::new(efcp_tx);
+    tokio::spawn(async move {
+        let actor = EfcpActor::new(efcp_rx);
+        actor.run().await;
+    });
+    println!("  → EFCP Actor spawned");
+
+    // RMT Actor (will be updated with real address after enrollment)
+    let (rmt_tx, rmt_rx) = mpsc::channel(32);
+    let _rmt_handle = RmtHandle::new(rmt_tx);
+    tokio::spawn(async move {
+        let actor = RmtActor::new(local_addr, rmt_rx);
+        actor.run().await;
+    });
+    println!("  → RMT Actor spawned");
+
+    // Shim Actor
+    let (shim_tx, shim_rx) = mpsc::channel(32);
+    let shim_handle = ShimHandle::new(shim_tx);
+    tokio::spawn(async move {
+        let actor = ShimActor::new(local_addr, shim_rx);
+        actor.run().await;
+    });
+    println!("  → Shim Actor spawned\n");
+
+    // Create IPCP
+    let mut ipcp = IpcProcess::with_name_and_address(config.name.clone(), local_addr);
+    ipcp.set_dif_name(config.dif_name.clone());
+    ipcp.set_state(IpcpState::Enrolling);
+
+    println!("✓ Created Member IPCP: {}", config.name);
+    println!("  DIF: {}", config.dif_name);
+    println!("  Status: Enrolling (address pending)");
+
+    // Bind shim layer to UDP socket
+    println!("\n✓ Binding to UDP socket...");
+    let (resp_tx, mut resp_rx) = mpsc::channel(1);
+    shim_handle
+        .send(ShimMessage::Bind {
+            addr: config.bind_address.clone(),
+            response: resp_tx,
+        })
+        .await
+        .unwrap();
+
+    match resp_rx.recv().await.unwrap() {
+        Ok(_) => {
+            let (resp_tx, mut resp_rx) = mpsc::channel(1);
+            shim_handle
+                .send(ShimMessage::GetLocalAddr { response: resp_tx })
+                .await
+                .unwrap();
+
+            if let Ok(addr) = resp_rx.recv().await.unwrap() {
+                println!("  Bound to: {}", addr);
+            }
+        }
+        Err(e) => {
+            eprintln!("  Failed to bind: {}", e);
+            return;
+        }
+    }
+
+    // Attempt enrollment with bootstrap peers
+    println!("\n✓ Initiating enrollment...");
+    println!("  Bootstrap peers: {:?}", config.bootstrap_peers);
+    println!("  Note: Enrollment protocol implementation pending\n");
+
+    // TODO: Implement actual enrollment protocol
+    // This would involve:
+    // 1. Send EnrollmentRequest to bootstrap peer via shim
+    // 2. Receive EnrollmentResponse with assigned address
+    // 3. Update RMT with assigned address
+    // 4. Sync RIB from bootstrap IPCP
+    // 5. Transition to Operational state
+
+    println!("⚠️  Member IPCP waiting for full enrollment implementation");
+    println!("   This would connect to: {}", config.bootstrap_peers[0]);
+
+    // Keep running
+    loop {
+        tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+        println!("  [Member IPCP waiting for enrollment]");
+    }
 }

@@ -1,0 +1,21 @@
+# RINA IPCP Configuration - Bootstrap Mode
+# This IPCP is the first in the DIF and provides enrollment services
+
+[ipcp]
+name = "ipcp-bootstrap"
+type = "normal"
+mode = "bootstrap"
+
+[dif]
+name = "production-dif"
+address = 1001
+address_pool_start = 1002
+address_pool_end = 1999
+
+[shim]
+bind_address = "0.0.0.0"
+bind_port = 7000
+
+[enrollment]
+# Bootstrap IPCP doesn't enroll with anyone
+bootstrap_peers = []

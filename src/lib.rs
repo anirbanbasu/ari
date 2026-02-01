@@ -10,6 +10,7 @@
 // Public module declarations
 pub mod actors;
 pub mod cdap;
+pub mod config;
 pub mod directory;
 pub mod efcp;
 pub mod enrollment;

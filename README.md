@@ -3,6 +3,52 @@ ARI - _A RINA Implementation_ is a Rust implementation of the [Recursive Interne
 
 The acronym 'ARI' is intentionally chosen to reflect both an expanded 'A RINA Implementation' and imply the similarities between networking and ant colonies where the Japanese word for ant, [蟻](https://jisho.org/search/%E8%9F%BB) or mostly written as アリ, is pronounced as 'ari'.
 
+## Quick Start
+
+### Demo Mode
+```bash
+cargo run
+```
+
+### Bootstrap IPCP
+```bash
+cargo run -- --config config/bootstrap.toml
+# or
+cargo run -- --mode bootstrap --name ipcp-a --dif-name test-dif --address 1001 --bind 0.0.0.0:7000
+```
+
+### Member IPCP
+```bash
+cargo run -- --config config/member.toml
+# or
+cargo run -- --mode member --name ipcp-b --dif-name test-dif --bind 0.0.0.0:7001 --bootstrap-peers 127.0.0.1:7000
+```
+
+### Documentation
+- **[RUNNING.md](RUNNING.md)** - Quick start and operational guide
+- **[CONFIG-EXAMPLES.md](CONFIG-EXAMPLES.md)** - Comprehensive configuration examples
+- **[CONFIG-SUMMARY.md](CONFIG-SUMMARY.md)** - Implementation details
+
+## Features
+
+### Implemented
+- ✅ Resource Information Base (RIB)
+- ✅ Common Distributed Application Protocol (CDAP)
+- ✅ Error and Flow Control Protocol (EFCP)
+- ✅ Relaying and Multiplexing Task (RMT)
+- ✅ UDP/IP Shim Layer
+- ✅ Directory Service
+- ✅ Flow Allocator
+- ✅ Enrollment Manager
+- ✅ Pluggable Policies (Routing, QoS, Scheduling)
+- ✅ Actor-based concurrent components
+- ✅ Multi-IPCP configuration system
+
+### In Progress
+- ⚠️ Full enrollment protocol implementation
+- ⚠️ CDAP synchronization over network
+- ⚠️ Inter-IPCP flow allocation
+
 ## License
 
 Copyright © 2026-present ARI Contributors
