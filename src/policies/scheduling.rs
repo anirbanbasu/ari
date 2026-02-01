@@ -12,13 +12,13 @@ use std::collections::VecDeque;
 pub trait SchedulingPolicy: Send + Sync {
     /// Enqueues a PDU
     fn enqueue(&mut self, pdu: Pdu) -> Result<(), String>;
-    
+
     /// Dequeues the next PDU to send
     fn dequeue(&mut self) -> Option<Pdu>;
-    
+
     /// Returns the number of queued PDUs
     fn queue_length(&self) -> usize;
-    
+
     /// Returns the policy name
     fn name(&self) -> &str;
 }
@@ -144,15 +144,15 @@ mod tests {
     #[test]
     fn test_fifo_scheduling() {
         let mut sched = FifoScheduling::new(10);
-        
+
         let pdu1 = Pdu::new_data(1, 2, 1, 2, 0, vec![1]);
         let pdu2 = Pdu::new_data(1, 2, 1, 2, 1, vec![2]);
-        
+
         sched.enqueue(pdu1.clone()).unwrap();
         sched.enqueue(pdu2.clone()).unwrap();
-        
+
         assert_eq!(sched.queue_length(), 2);
-        
+
         let dequeued = sched.dequeue().unwrap();
         assert_eq!(dequeued.sequence_num, 0); // FIFO order
     }
@@ -160,20 +160,36 @@ mod tests {
     #[test]
     fn test_priority_scheduling() {
         let mut sched = PriorityScheduling::new(4, 10);
-        
+
         let low_pri = Pdu::new_data_with_qos(
-            1, 2, 1, 2, 0, vec![1],
-            QoSParameters { priority: 50, ..Default::default() }
+            1,
+            2,
+            1,
+            2,
+            0,
+            vec![1],
+            QoSParameters {
+                priority: 50,
+                ..Default::default()
+            },
         );
-        
+
         let high_pri = Pdu::new_data_with_qos(
-            1, 2, 1, 2, 1, vec![2],
-            QoSParameters { priority: 200, ..Default::default() }
+            1,
+            2,
+            1,
+            2,
+            1,
+            vec![2],
+            QoSParameters {
+                priority: 200,
+                ..Default::default()
+            },
         );
-        
+
         sched.enqueue(low_pri).unwrap();
         sched.enqueue(high_pri).unwrap();
-        
+
         // High priority should be dequeued first
         let dequeued = sched.dequeue().unwrap();
         assert_eq!(dequeued.sequence_num, 1);
@@ -182,12 +198,12 @@ mod tests {
     #[test]
     fn test_scheduling_full_queue() {
         let mut sched = FifoScheduling::new(2);
-        
+
         let pdu = Pdu::new_data(1, 2, 1, 2, 0, vec![1]);
-        
+
         sched.enqueue(pdu.clone()).unwrap();
         sched.enqueue(pdu.clone()).unwrap();
-        
+
         let result = sched.enqueue(pdu);
         assert!(result.is_err());
     }

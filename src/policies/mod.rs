@@ -14,4 +14,4 @@ pub mod scheduling;
 
 pub use qos::{QoSPolicy, SimpleQoSPolicy};
 pub use routing::{RoutingPolicy, ShortestPathRouting};
-pub use scheduling::{SchedulingPolicy, FifoScheduling, PriorityScheduling};
+pub use scheduling::{FifoScheduling, PriorityScheduling, SchedulingPolicy};

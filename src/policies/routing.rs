@@ -11,10 +11,10 @@ use std::collections::HashMap;
 pub trait RoutingPolicy: Send + Sync {
     /// Computes the next hop for a destination
     fn compute_next_hop(&self, src: u64, dst: u64, topology: &NetworkTopology) -> Option<u64>;
-    
+
     /// Updates routing information based on topology changes
     fn update(&mut self, topology: &NetworkTopology);
-    
+
     /// Returns the policy name
     fn name(&self) -> &str;
 }
@@ -34,10 +34,7 @@ impl NetworkTopology {
     }
 
     pub fn add_link(&mut self, from: u64, to: u64, cost: u32) {
-        self.adjacency
-            .entry(from)
-            .or_insert_with(Vec::new)
-            .push((to, cost));
+        self.adjacency.entry(from).or_default().push((to, cost));
     }
 
     pub fn get_neighbors(&self, node: u64) -> Vec<(u64, u32)> {
@@ -101,7 +98,7 @@ impl ShortestPathRouting {
         }
 
         // Build routing table from previous pointers
-        for (&dest, _) in &distances {
+        for &dest in distances.keys() {
             if dest == source {
                 continue;
             }
@@ -132,7 +129,7 @@ impl RoutingPolicy for ShortestPathRouting {
 
     fn update(&mut self, topology: &NetworkTopology) {
         self.routing_table.clear();
-        
+
         // Compute shortest paths from all nodes
         for &source in topology.adjacency.keys() {
             self.compute_shortest_paths(source, topology);

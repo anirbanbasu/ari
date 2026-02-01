@@ -149,12 +149,12 @@ impl IpcProcess {
     /// Shuts down the IPCP
     pub fn shutdown(&mut self) -> Result<(), String> {
         self.state = IpcpState::ShuttingDown;
-        
+
         // TODO: Clean up resources
         // - Deallocate all flows
         // - Close shim connections
         // - Clear RIB
-        
+
         self.state = IpcpState::Shutdown;
         Ok(())
     }
@@ -195,13 +195,13 @@ mod tests {
     #[test]
     fn test_ipcp_state_transitions() {
         let mut ipcp = IpcProcess::new();
-        
+
         ipcp.start().unwrap();
         assert_eq!(ipcp.state, IpcpState::Ready);
-        
+
         ipcp.set_state(IpcpState::Operational);
         assert!(ipcp.is_operational());
-        
+
         ipcp.shutdown().unwrap();
         assert_eq!(ipcp.state, IpcpState::Shutdown);
     }
@@ -210,7 +210,7 @@ mod tests {
     fn test_ipcp_cannot_start_after_shutdown() {
         let mut ipcp = IpcProcess::new();
         ipcp.shutdown().unwrap();
-        
+
         let result = ipcp.start();
         assert!(result.is_err());
     }
