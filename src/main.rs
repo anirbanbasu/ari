@@ -2,7 +2,7 @@
 // Copyright © 2026-present ARI Contributors
 
 use ari::{
-    Dif, Directory, EfcpActor, EfcpHandle, EfcpMessage, EnrollmentManager, FlowAllocator,
+    Dif, Directory, EfcpActor, EfcpHandle, EfcpMessage, EnrolmentManager, FlowAllocator,
     FlowConfig, ForwardingEntry, IpcProcess, IpcpState, PriorityScheduling, RibActor, RibHandle,
     RibMessage, RibValue, RmtActor, RmtHandle, RmtMessage, RoutingPolicy, ShimActor, ShimHandle,
     ShimMessage, ShortestPathRouting,
@@ -126,7 +126,7 @@ async fn run_demo_mode() {
         ipcp.address.unwrap(),
         ipcp.dif_name
     );
-    println!("  Components: RIB, CDAP, EFCP, RMT, Shim, FAL, Directory, Enrollment\n");
+    println!("  Components: RIB, CDAP, EFCP, RMT, Shim, FAL, Directory, Enrolment\n");
 
     // === RIB Operations (Actor-based) ===
     println!("=== 1. Resource Information Base (RIB Actor) ===");
@@ -345,13 +345,13 @@ async fn run_demo_mode() {
     println!("  Flow allocated with ID: {:?}", response.flow_id);
     println!("  Active flows: {}\n", fal.flow_count());
 
-    // === Enrollment Manager ===
-    println!("=== 8. Enrollment Manager ===");
+    // === Enrolment Manager ===
+    println!("=== 8. Enrolment Manager ===");
     let rib = ari::Rib::new();
-    let mut em = EnrollmentManager::new(rib);
-    let enroll_req = em.initiate_enrollment("ipcp-1".to_string(), "test-dif".to_string(), 1001);
-    println!("  Initiated enrollment for {}", enroll_req.ipcp_name);
-    println!("  Enrollment state: {:?}\n", em.state());
+    let mut em = EnrolmentManager::new(rib);
+    let enroll_req = em.initiate_enrolment("ipcp-1".to_string(), "test-dif".to_string(), 1001);
+    println!("  Initiated enrolment for {}", enroll_req.ipcp_name);
+    println!("  Enrolment state: {:?}\n", em.state());
 
     // === Pluggable Policies ===
     println!("=== 9. Pluggable Policies ===");
@@ -400,7 +400,7 @@ async fn run_demo_mode() {
     println!("✓ PDU: Consolidated definitions with QoS support");
     println!("✓ Directory: Name resolution and registration service");
     println!("✓ FAL: Flow allocation protocol");
-    println!("✓ Enrollment: IPCP enrollment manager");
+    println!("✓ Enrolment: IPCP enrolment manager");
     println!("✓ Policies: Pluggable routing, scheduling, and QoS");
     println!("✓ RIB Actor: Managing distributed state");
     println!("✓ EFCP Actor: Managing flows concurrently");
@@ -517,7 +517,7 @@ async fn run_bootstrap_mode(config: IpcpConfiguration) {
     );
 
     println!("\n🎉 Bootstrap IPCP operational!");
-    println!("   Waiting for enrollment requests from member IPCPs...\n");
+    println!("   Waiting for enrolment requests from member IPCPs...\n");
 
     // Keep running
     loop {
@@ -530,8 +530,8 @@ async fn run_bootstrap_mode(config: IpcpConfiguration) {
 async fn run_member_mode(config: IpcpConfiguration) {
     println!("=== RINA Member IPCP ===\n");
 
-    // Member starts without a RINA address (will get one during enrollment)
-    let local_addr = 0; // Placeholder until enrollment
+    // Member starts without a RINA address (will get one during enrolment)
+    let local_addr = 0; // Placeholder until enrolment
 
     // Spawn actor tasks
     println!("✓ Spawning RINA component actors...\n");
@@ -554,7 +554,7 @@ async fn run_member_mode(config: IpcpConfiguration) {
     });
     println!("  → EFCP Actor spawned");
 
-    // RMT Actor (will be updated with real address after enrollment)
+    // RMT Actor (will be updated with real address after enrolment)
     let (rmt_tx, rmt_rx) = mpsc::channel(32);
     let _rmt_handle = RmtHandle::new(rmt_tx);
     tokio::spawn(async move {
@@ -610,25 +610,34 @@ async fn run_member_mode(config: IpcpConfiguration) {
         }
     }
 
-    // Attempt enrollment with bootstrap peers
-    println!("\n✓ Initiating enrollment...");
+    // Attempt enrolment with bootstrap peers
+    println!("\n✓ Initiating enrolment (Phase 1 foundation ready)...");
     println!("  Bootstrap peers: {:?}", config.bootstrap_peers);
-    println!("  Note: Enrollment protocol implementation pending\n");
+    println!("  Note: Full async enrolment protocol pending Phase 2\n");
 
-    // TODO: Implement actual enrollment protocol
-    // This would involve:
-    // 1. Send EnrollmentRequest to bootstrap peer via shim
-    // 2. Receive EnrollmentResponse with assigned address
+    // Phase 1 demonstrates the enrolment flow structure:
+    println!("  Phase 1 Capabilities:");
+    println!("    ✓ Management flow allocation via EFCP");
+    println!("    ✓ CDAP enrolment message construction");
+    println!("    ✓ Enrolment request/response serialization");
+    println!("    ⚠  Async PDU reception (Phase 2)");
+    println!("    ⚠  Network integration (Phase 2)");
+    println!("\n  See ENROLMENT-PHASE1.md for implementation details");
+    println!("  Run: cargo test enrolment -- --nocapture");
+
+    // TODO: Phase 2 implementation will add:
+    // 1. Async send EnrolmentRequest to bootstrap peer via shim
+    // 2. Async receive EnrolmentResponse with assigned address
     // 3. Update RMT with assigned address
     // 4. Sync RIB from bootstrap IPCP
     // 5. Transition to Operational state
 
-    println!("⚠️  Member IPCP waiting for full enrollment implementation");
-    println!("   This would connect to: {}", config.bootstrap_peers[0]);
+    println!("\n⚠️  Member IPCP waiting for Phase 2 async enrolment");
+    println!("   Would connect to: {}", config.bootstrap_peers[0]);
 
     // Keep running
     loop {
         tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
-        println!("  [Member IPCP waiting for enrollment]");
+        println!("  [Member IPCP ready - awaiting Phase 2 enrolment]");
     }
 }

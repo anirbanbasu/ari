@@ -1,5 +1,5 @@
 # RINA IPCP Configuration - Bootstrap Mode
-# This IPCP is the first in the DIF and provides enrollment services
+# This IPCP is the first in the DIF and provides enrolment services
 
 [ipcp]
 name = "ipcp-bootstrap"
@@ -16,6 +16,6 @@ address_pool_end = 1999
 bind_address = "0.0.0.0"
 bind_port = 7000
 
-[enrollment]
+[enrolment]
 # Bootstrap IPCP doesn't enroll with anyone
 bootstrap_peers = []

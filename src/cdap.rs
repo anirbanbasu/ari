@@ -172,6 +172,17 @@ impl CdapSession {
         )
     }
 
+    /// Creates a START request message (for operations like enrolment)
+    pub fn start_request(&mut self, obj_name: String, obj_value: Option<RibValue>) -> CdapMessage {
+        CdapMessage::new_request(
+            CdapOpCode::Start,
+            obj_name,
+            None,
+            obj_value,
+            self.next_invoke_id(),
+        )
+    }
+
     /// Processes an incoming CDAP message and returns a response
     pub fn process_message(&self, msg: &CdapMessage) -> CdapMessage {
         match msg.op_code {

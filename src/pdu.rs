@@ -38,7 +38,7 @@ pub enum PduType {
     Ack,
     /// Control PDU (e.g., flow control)
     Control,
-    /// Management PDU (for enrollment, etc.)
+    /// Management PDU (for enrolment, etc.)
     Management,
 }
 

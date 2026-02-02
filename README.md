@@ -28,6 +28,7 @@ cargo run -- --mode member --name ipcp-b --dif-name test-dif --bind 0.0.0.0:7001
 - **[RUNNING.md](RUNNING.md)** - Quick start and operational guide
 - **[CONFIG-EXAMPLES.md](CONFIG-EXAMPLES.md)** - Comprehensive configuration examples
 - **[CONFIG-SUMMARY.md](CONFIG-SUMMARY.md)** - Implementation details
+- **[ENROLMENT-PHASE1.md](ENROLMENT-PHASE1.md)** - Enrolment implementation guide (Phase 1)
 
 ## Features
 
@@ -39,15 +40,49 @@ cargo run -- --mode member --name ipcp-b --dif-name test-dif --bind 0.0.0.0:7001
 - ✅ UDP/IP Shim Layer
 - ✅ Directory Service
 - ✅ Flow Allocator
-- ✅ Enrollment Manager
+- ✅ Enrolment Manager
 - ✅ Pluggable Policies (Routing, QoS, Scheduling)
 - ✅ Actor-based concurrent components
 - ✅ Multi-IPCP configuration system
 
 ### In Progress
-- ⚠️ Full enrollment protocol implementation
+- ⚠️ Full enrolment protocol implementation
 - ⚠️ CDAP synchronization over network
 - ⚠️ Inter-IPCP flow allocation
+
+### Enrolment Implementation Plan
+
+The enrolment protocol will be implemented in phases to enable IPCPs to join a DIF:
+
+#### Phase 1: Network Enrolment Foundation ✅ (In Progress)
+- Extend `EnrolmentManager` with network capabilities
+- Allocate management flows via EFCP for enrolment
+- Send/receive CDAP enrolment messages over EFCP flows
+- Complete basic end-to-end enrolment: Member → Bootstrap → Enrolled
+
+#### Phase 2: Robust Flow Management
+- Implement proper error handling and timeouts
+- Add retry logic for failed connections
+- Handle flow allocation failures gracefully
+- Improve state machine with detailed substates
+
+#### Phase 3: Advanced RIB Synchronization
+- Implement delta-based RIB synchronization
+- Add versioning and timestamps to RIB objects
+- Support incremental updates during enrolment
+- Add consistency validation checks
+
+#### Phase 4: Multi-peer Support
+- Enable enrolment with multiple bootstrap peers
+- Handle peer selection and failover
+- Implement conflict resolution for divergent information
+- Add gossip protocol for dynamic peer discovery
+
+#### Phase 5: Security and Advanced Features
+- Add authentication and authorization
+- Implement certificate-based identity verification
+- Support dynamic policy updates during enrolment
+- Add re-enrolment after network failures
 
 ## License
 

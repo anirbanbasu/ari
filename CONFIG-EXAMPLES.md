@@ -36,7 +36,7 @@ address_pool_end = 1999
 bind_address = "0.0.0.0"
 bind_port = 7000
 
-[enrollment]
+[enrolment]
 bootstrap_peers = []
 ```
 
@@ -72,7 +72,7 @@ cargo run -- \
 
 ## Member IPCP
 
-Member IPCPs enroll with a bootstrap IPCP to join a DIF. They receive their address dynamically during enrollment.
+Member IPCPs enroll with a bootstrap IPCP to join a DIF. They receive their address dynamically during enrolment.
 
 ### Using Configuration File
 
@@ -85,13 +85,13 @@ mode = "member"
 
 [dif]
 name = "production-dif"
-# Address omitted - will be assigned during enrollment
+# Address omitted - will be assigned during enrolment
 
 [shim]
 bind_address = "0.0.0.0"
 bind_port = 7001
 
-[enrollment]
+[enrolment]
 bootstrap_peers = [
     { address = "127.0.0.1:7000", rina_addr = 1001 }
 ]
@@ -270,7 +270,7 @@ networks:
 - `--mode member` or `ipcp.mode = "member"`
 - `--dif-name` or `dif.name`: DIF name
 - `--bind` or `shim.bind_address`+`shim.bind_port`: UDP socket address
-- `--bootstrap-peers` or `enrollment.bootstrap_peers`: Bootstrap IPCP addresses
+- `--bootstrap-peers` or `enrolment.bootstrap_peers`: Bootstrap IPCP addresses
 
 #### Demo Mode
 - No parameters required

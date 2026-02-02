@@ -8,7 +8,7 @@
 use crate::cdap::CdapSession;
 use crate::directory::Directory;
 use crate::efcp::Efcp;
-use crate::enrollment::{EnrollmentManager, EnrollmentState};
+use crate::enrolment::{EnrolmentManager, EnrolmentState};
 use crate::fal::FlowAllocator;
 use crate::rib::Rib;
 use crate::rmt::Rmt;
@@ -58,8 +58,8 @@ pub struct IpcProcess {
     pub fal: FlowAllocator,
     /// Directory service
     pub directory: Directory,
-    /// Enrollment manager
-    pub enrollment: EnrollmentManager,
+    /// Enrolment manager
+    pub enrolment: EnrolmentManager,
 }
 
 impl IpcProcess {
@@ -70,7 +70,7 @@ impl IpcProcess {
 
         Self {
             cdap: CdapSession::new(rib.clone()),
-            enrollment: EnrollmentManager::new(rib.clone()),
+            enrolment: EnrolmentManager::new(rib.clone()),
             rib,
             name: None,
             address: None,
@@ -90,7 +90,7 @@ impl IpcProcess {
 
         Self {
             cdap: CdapSession::new(rib.clone()),
-            enrollment: EnrollmentManager::new(rib.clone()),
+            enrolment: EnrolmentManager::new(rib.clone()),
             rib,
             name: Some(name),
             address: Some(address),
@@ -133,7 +133,7 @@ impl IpcProcess {
 
     /// Checks if IPCP is enrolled
     pub fn is_enrolled(&self) -> bool {
-        *self.enrollment.state() == EnrollmentState::Enrolled
+        *self.enrolment.state() == EnrolmentState::Enrolled
     }
 
     /// Starts the IPCP
