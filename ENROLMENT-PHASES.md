@@ -1,16 +1,14 @@
-# Enrolment Implementation - Phases 1 & 2
+# Enrolment Implementation Guide
 
 ## Overview
 
-This document describes the two-phase implementation of IPCP enrolment, enabling member IPCPs to join a DIF by communicating with a bootstrap IPCP over the network.
+This document describes the **fully implemented** async enrolment protocol, enabling member IPCPs to join a DIF by communicating with a bootstrap IPCP over the network.
 
-**Status: Phase 2 Complete** ✅
+**Status: Complete Implementation** ✅
 
-## Phase 1: Foundation (Complete)
+The implementation is a unified async enrolment system with timeout, retry, and full network integration. This guide documents the complete implementation details, architecture, and usage patterns.
 
-Phase 1 established the basic enrolment protocol and data structures.
-
-## What's Implemented
+## Implementation Components
 
 ### 1. Serialization Support
 
@@ -169,30 +167,30 @@ The tests in `src/enrolment.rs` validate:
 - CDAP message serialization
 - DIF configuration validation
 
-## What's Missing (To be implemented in Phase 2+)
+## Current Limitations
 
-1. **Async/Await Implementation**: Currently synchronous placeholders
-   - Proper async reception of enrolment responses
-   - Event-driven PDU processing
+The current implementation supports basic enrolment with the following limitations:
 
-2. **Error Handling**: Basic error handling present, needs improvement
-   - Timeout handling
-   - Retry logic
-   - Connection failure recovery
+1. **Address Assignment**: Member IPCPs do not receive dynamic address assignments from bootstrap
+   - Member uses address 0 as placeholder
+   - No address pool management in bootstrap
 
-3. **Address Mapping**: Shim layer needs enhancement
-   - Map RINA address 0 to temporary handling
-   - Register RINA address ↔ IP:port mappings dynamically
+2. **RIB Synchronization**: Limited RIB data transfer
+   - Only DIF name is synchronized
+   - No full RIB snapshot or incremental updates
 
-4. **PDU Transport**: Need integration with actual network layer
-   - Send PDUs over UDP shim
-   - Receive and demultiplex PDUs
-   - Route to correct EFCP flow
+3. **Single Bootstrap Peer**: No multi-peer support yet
+   - Member tries only one bootstrap peer
+   - No peer selection or failover logic
 
-5. **Multi-peer Support**: Currently single bootstrap peer
-   - Try multiple bootstrap peers
-   - Peer selection logic
-   - Failover handling
+4. **No Security**: Enrolment messages are not authenticated
+   - No mutual authentication
+   - No encryption of enrolment data
+   - No certificate validation
+
+5. **No Re-enrolment**: Cannot recover from network failures
+   - No keep-alive mechanism
+   - No automatic re-enrolment after disconnection
 
 ## Dependencies
 
@@ -202,15 +200,15 @@ The tests in `src/enrolment.rs` validate:
 
 ---
 
-## Phase 2: Async Network Integration (Complete)
+## Async Network Integration
 
-Phase 2 implements the complete async enrolment protocol with real network communication.
+The enrolment protocol uses a fully async implementation with real network communication, timeout, and retry logic.
 
-### What's Implemented
+### Key Components
 
-#### 1. AsyncEnrolmentManager (`src/enrolment_async.rs`)
+#### 1. EnrolmentManager (`src/enrolment.rs`)
 
-A new async wrapper around `EnrolmentManager` that provides:
+The `EnrolmentManager` is a fully async component that provides:
 
 **`enrol_with_bootstrap(bootstrap_addr)`**
 - Full async enrolment flow with timeout and retry logic

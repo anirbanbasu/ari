@@ -52,39 +52,30 @@ The current documentation is scattered and will be consolidated over time. For n
 - ⚠️ CDAP synchronization over network
 - ⚠️ Inter-IPCP flow allocation
 
-### Enrolment Implementation Plan
+### Enrolment Implementation
 
-The enrolment protocol will be implemented in phases to enable IPCPs to join a DIF:
+The enrolment protocol is **fully implemented** ✅ with async network communication, enabling member IPCPs to join a DIF:
 
-#### Phase 1: Network Enrolment Foundation ✅ (Completed with basic functionality)
-- Extend `EnrolmentManager` with network capabilities
-- Allocate management flows via EFCP for enrolment
-- Send/receive CDAP enrolment messages over EFCP flows
-- Complete basic end-to-end enrolment: Member → Bootstrap → Enrolled
+#### Core Features (Implemented)
+- **Fully Async**: tokio-based async/await throughout the enrolment flow
+- **Timeout & Retry**: 30-second timeout per attempt, 3 retry attempts with exponential backoff (1s, 2s, 4s)
+- **Binary Protocol**: Efficient bincode serialization for CDAP messages over PDUs
+- **Address Mapping**: Dynamic RINA ↔ socket address translation with auto-registration
+- **Bidirectional**: Handles both member-initiated requests and bootstrap responses
+- **Error Resilient**: Comprehensive error handling for network, serialization, and timeout errors
 
-#### Phase 2: Robust Flow Management
-- Implement proper error handling and timeouts
-- Add retry logic for failed connections
-- Handle flow allocation failures gracefully
-- Improve state machine with detailed substates
+#### Enrolment Flow
+1. **Member IPCP**: Initiates enrolment by sending CDAP CREATE message via UDP PDU
+2. **Bootstrap IPCP**: Receives request, validates, and responds with DIF name
+3. **Member IPCP**: Receives response, updates state to Enrolled, stores DIF name in RIB
+4. **Retry Logic**: Automatically retries with backoff if enrolment fails
 
-#### Phase 3: Advanced RIB Synchronization
-- Implement delta-based RIB synchronization
-- Add versioning and timestamps to RIB objects
-- Support incremental updates during enrolment
-- Add consistency validation checks
-
-#### Phase 4: Multi-peer Support
-- Enable enrolment with multiple bootstrap peers
-- Handle peer selection and failover
-- Implement conflict resolution for divergent information
-- Add gossip protocol for dynamic peer discovery
-
-#### Phase 5: Security and Advanced Features
-- Add authentication and authorization
-- Implement certificate-based identity verification
-- Support dynamic policy updates during enrolment
-- Add re-enrolment after network failures
+#### Future Enhancements (Not Yet Implemented)
+- **Address Assignment**: Bootstrap assigns dynamic addresses from pool
+- **RIB Synchronization**: Full RIB snapshot transfer and incremental updates
+- **Multi-peer Bootstrap**: Peer selection, failover, and dynamic discovery
+- **Security**: Authentication, encryption, and certificate validation
+- **Re-enrolment**: Automatic re-enrolment after network failures
 
 ## License
 
