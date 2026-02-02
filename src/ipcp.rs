@@ -13,6 +13,7 @@ use crate::fal::FlowAllocator;
 use crate::rib::Rib;
 use crate::rmt::Rmt;
 use crate::shim::UdpShim;
+use std::sync::Arc;
 
 /// IPCP operational state
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,10 +68,12 @@ impl IpcProcess {
     pub fn new() -> Self {
         let rib = Rib::new();
         let address = 0;
+        let shim = UdpShim::new(address);
+        let shim_for_enrolment = Arc::new(UdpShim::new(address));
 
         Self {
             cdap: CdapSession::new(rib.clone()),
-            enrolment: EnrolmentManager::new(rib.clone()),
+            enrolment: EnrolmentManager::new(rib.clone(), shim_for_enrolment),
             rib,
             name: None,
             address: None,
@@ -78,7 +81,7 @@ impl IpcProcess {
             state: IpcpState::Initializing,
             efcp: Efcp::new(),
             rmt: Rmt::new(address),
-            shim: UdpShim::new(address),
+            shim,
             fal: FlowAllocator::new(),
             directory: Directory::new(),
         }
@@ -87,10 +90,12 @@ impl IpcProcess {
     /// Creates a new IPC Process with a given name and address
     pub fn with_name_and_address(name: String, address: u64) -> Self {
         let rib = Rib::new();
+        let shim = UdpShim::new(address);
+        let shim_for_enrolment = Arc::new(UdpShim::new(address));
 
         Self {
             cdap: CdapSession::new(rib.clone()),
-            enrolment: EnrolmentManager::new(rib.clone()),
+            enrolment: EnrolmentManager::new(rib.clone(), shim_for_enrolment),
             rib,
             name: Some(name),
             address: Some(address),
@@ -98,7 +103,7 @@ impl IpcProcess {
             state: IpcpState::Ready,
             efcp: Efcp::new(),
             rmt: Rmt::new(address),
-            shim: UdpShim::new(address),
+            shim,
             fal: FlowAllocator::new(),
             directory: Directory::new(),
         }

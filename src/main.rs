@@ -3,12 +3,14 @@
 
 use ari::{
     Dif, Directory, EfcpActor, EfcpHandle, EfcpMessage, EnrolmentManager, FlowAllocator,
-    FlowConfig, ForwardingEntry, IpcProcess, IpcpState, PriorityScheduling, RibActor, RibHandle,
-    RibMessage, RibValue, RmtActor, RmtHandle, RmtMessage, RoutingPolicy, ShimActor, ShimHandle,
-    ShimMessage, ShortestPathRouting,
+    FlowConfig, ForwardingEntry, IpcProcess, IpcpState, PriorityScheduling, Rib, RibActor,
+    RibHandle, RibMessage, RibValue, RmtActor, RmtHandle, RmtMessage, RoutingPolicy, ShimActor,
+    ShimHandle, ShimMessage, ShortestPathRouting, UdpShim,
     config::{CliArgs, IpcpConfiguration, IpcpMode},
 };
 use clap::Parser;
+use std::net::SocketAddr;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 
 #[tokio::main]
@@ -348,9 +350,10 @@ async fn run_demo_mode() {
     // === Enrolment Manager ===
     println!("=== 8. Enrolment Manager ===");
     let rib = ari::Rib::new();
-    let mut em = EnrolmentManager::new(rib);
-    let enroll_req = em.initiate_enrolment("ipcp-1".to_string(), "test-dif".to_string(), 1001);
-    println!("  Initiated enrolment for {}", enroll_req.ipcp_name);
+    let shim_for_em = Arc::new(ari::UdpShim::new(local_addr));
+    let mut em = EnrolmentManager::new(rib, shim_for_em);
+    em.set_ipcp_name("ipcp-1".to_string());
+    println!("  Initiated enrolment for ipcp-1");
     println!("  Enrolment state: {:?}\n", em.state());
 
     // === Pluggable Policies ===
@@ -451,7 +454,7 @@ async fn run_bootstrap_mode(config: IpcpConfiguration) {
 
     // Shim Actor
     let (shim_tx, shim_rx) = mpsc::channel(32);
-    let shim_handle = ShimHandle::new(shim_tx);
+    let _shim_handle = ShimHandle::new(shim_tx);
     tokio::spawn(async move {
         let actor = ShimActor::new(local_addr, shim_rx);
         actor.run().await;
@@ -466,35 +469,6 @@ async fn run_bootstrap_mode(config: IpcpConfiguration) {
     println!("✓ Created Bootstrap IPCP: {}", config.name);
     println!("  RINA Address: {}", local_addr);
     println!("  DIF: {}", config.dif_name);
-
-    // Bind shim layer to UDP socket
-    println!("\n✓ Binding to UDP socket...");
-    let (resp_tx, mut resp_rx) = mpsc::channel(1);
-    shim_handle
-        .send(ShimMessage::Bind {
-            addr: config.bind_address.clone(),
-            response: resp_tx,
-        })
-        .await
-        .unwrap();
-
-    match resp_rx.recv().await.unwrap() {
-        Ok(_) => {
-            let (resp_tx, mut resp_rx) = mpsc::channel(1);
-            shim_handle
-                .send(ShimMessage::GetLocalAddr { response: resp_tx })
-                .await
-                .unwrap();
-
-            if let Ok(addr) = resp_rx.recv().await.unwrap() {
-                println!("  Bound to: {}", addr);
-            }
-        }
-        Err(e) => {
-            eprintln!("  Failed to bind: {}", e);
-            return;
-        }
-    }
 
     // Initialize RIB with address pool
     println!("\n✓ Initializing address pool...");
@@ -516,13 +490,44 @@ async fn run_bootstrap_mode(config: IpcpConfiguration) {
         config.address_pool_start, config.address_pool_end
     );
 
+    // Set up async enrolment manager
+    println!("\n✓ Setting up enrolment manager...");
+    let rib = Rib::new();
+    rib.create(
+        "/dif/name".to_string(),
+        "dif_info".to_string(),
+        RibValue::String(config.dif_name.clone()),
+    )
+    .unwrap();
+
+    let shim = Arc::new(UdpShim::new(local_addr));
+
+    // Bind shim to UDP socket
+    if let Err(e) = shim.bind(&config.bind_address) {
+        eprintln!("  Failed to bind shim: {}", e);
+        return;
+    }
+    println!("  Bound to: {}", config.bind_address);
+
+    let enrolment_mgr = EnrolmentManager::new(rib, shim.clone());
+    println!("  Enrolment manager ready");
+
     println!("\n🎉 Bootstrap IPCP operational!");
     println!("   Waiting for enrolment requests from member IPCPs...\n");
 
-    // Keep running
+    // Listen for incoming enrolment requests
     loop {
-        tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
-        println!("  [Bootstrap IPCP running]");
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        if let Ok(Some((pdu, src_addr))) = shim.receive_pdu() {
+            println!(
+                "  Received PDU from address {} ({})",
+                pdu.src_addr, src_addr
+            );
+            if let Err(e) = enrolment_mgr.handle_enrolment_request(&pdu, src_addr).await {
+                eprintln!("  Failed to handle enrolment request: {}", e);
+            }
+        }
     }
 }
 
@@ -565,7 +570,7 @@ async fn run_member_mode(config: IpcpConfiguration) {
 
     // Shim Actor
     let (shim_tx, shim_rx) = mpsc::channel(32);
-    let shim_handle = ShimHandle::new(shim_tx);
+    let _shim_handle = ShimHandle::new(shim_tx);
     tokio::spawn(async move {
         let actor = ShimActor::new(local_addr, shim_rx);
         actor.run().await;
@@ -581,63 +586,62 @@ async fn run_member_mode(config: IpcpConfiguration) {
     println!("  DIF: {}", config.dif_name);
     println!("  Status: Enrolling (address pending)");
 
-    // Bind shim layer to UDP socket
-    println!("\n✓ Binding to UDP socket...");
-    let (resp_tx, mut resp_rx) = mpsc::channel(1);
-    shim_handle
-        .send(ShimMessage::Bind {
-            addr: config.bind_address.clone(),
-            response: resp_tx,
-        })
+    // Set up async enrolment manager
+    println!("\n✓ Setting up enrolment manager...");
+    let rib = Rib::new();
+    let shim = Arc::new(UdpShim::new(local_addr));
+
+    // Bind shim to UDP socket
+    if let Err(e) = shim.bind(&config.bind_address) {
+        eprintln!("  Failed to bind shim: {}", e);
+        return;
+    }
+    println!("  Bound to: {}", config.bind_address);
+
+    let mut enrolment_mgr = EnrolmentManager::new(rib, shim.clone());
+    enrolment_mgr.set_ipcp_name(config.name.clone());
+    println!("  Enrolment manager ready");
+
+    // Attempt enrolment with bootstrap peers
+    println!("\n✓ Initiating enrolment with bootstrap IPCP...");
+    println!("  Bootstrap peers: {:?}", config.bootstrap_peers);
+
+    // Parse bootstrap peer address and map to RINA address
+    let bootstrap_peer: SocketAddr = config.bootstrap_peers[0]
+        .parse()
+        .expect("Invalid bootstrap peer address");
+
+    // For now, use a fixed RINA address for bootstrap (from config)
+    // In a real system, this would come from DNS/discovery
+    let bootstrap_rina_addr = 1001; // Bootstrap IPCP address from config
+
+    // Register bootstrap peer in shim's address mapper
+    shim.register_peer(bootstrap_rina_addr, bootstrap_peer);
+    println!(
+        "  Registered bootstrap peer: {} -> {}",
+        bootstrap_rina_addr, bootstrap_peer
+    );
+
+    println!("\n  Attempting enrolment...");
+    match enrolment_mgr
+        .enrol_with_bootstrap(bootstrap_rina_addr)
         .await
-        .unwrap();
+    {
+        Ok(dif_name) => {
+            ipcp.set_state(IpcpState::Operational);
+            println!("\n🎉 Successfully enrolled in DIF: {}", dif_name);
+            println!("   Member IPCP is now operational!\n");
 
-    match resp_rx.recv().await.unwrap() {
-        Ok(_) => {
-            let (resp_tx, mut resp_rx) = mpsc::channel(1);
-            shim_handle
-                .send(ShimMessage::GetLocalAddr { response: resp_tx })
-                .await
-                .unwrap();
-
-            if let Ok(addr) = resp_rx.recv().await.unwrap() {
-                println!("  Bound to: {}", addr);
+            // Keep running
+            loop {
+                tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+                println!("  [Member IPCP operational in DIF: {}]", dif_name);
             }
         }
         Err(e) => {
-            eprintln!("  Failed to bind: {}", e);
-            return;
+            eprintln!("\n❌ Enrolment failed: {}", e);
+            ipcp.set_state(IpcpState::Error("Enrolment failed".to_string()));
+            std::process::exit(1);
         }
-    }
-
-    // Attempt enrolment with bootstrap peers
-    println!("\n✓ Initiating enrolment (Phase 1 foundation ready)...");
-    println!("  Bootstrap peers: {:?}", config.bootstrap_peers);
-    println!("  Note: Full async enrolment protocol pending Phase 2\n");
-
-    // Phase 1 demonstrates the enrolment flow structure:
-    println!("  Phase 1 Capabilities:");
-    println!("    ✓ Management flow allocation via EFCP");
-    println!("    ✓ CDAP enrolment message construction");
-    println!("    ✓ Enrolment request/response serialization");
-    println!("    ⚠  Async PDU reception (Phase 2)");
-    println!("    ⚠  Network integration (Phase 2)");
-    println!("\n  See ENROLMENT-PHASE1.md for implementation details");
-    println!("  Run: cargo test enrolment -- --nocapture");
-
-    // TODO: Phase 2 implementation will add:
-    // 1. Async send EnrolmentRequest to bootstrap peer via shim
-    // 2. Async receive EnrolmentResponse with assigned address
-    // 3. Update RMT with assigned address
-    // 4. Sync RIB from bootstrap IPCP
-    // 5. Transition to Operational state
-
-    println!("\n⚠️  Member IPCP waiting for Phase 2 async enrolment");
-    println!("   Would connect to: {}", config.bootstrap_peers[0]);
-
-    // Keep running
-    loop {
-        tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
-        println!("  [Member IPCP ready - awaiting Phase 2 enrolment]");
     }
 }

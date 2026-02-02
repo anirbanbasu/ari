@@ -6,10 +6,11 @@
 //! Common PDU structures used across RINA components.
 //! Consolidated from various modules for consistency.
 
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Protocol Data Unit (PDU) - the basic unit of data transfer
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Pdu {
     /// Source address
     pub src_addr: u64,
@@ -30,7 +31,7 @@ pub struct Pdu {
 }
 
 /// Types of PDUs
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PduType {
     /// Data transfer PDU
     Data,
@@ -54,7 +55,7 @@ impl fmt::Display for PduType {
 }
 
 /// Quality of Service parameters for PDUs
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QoSParameters {
     /// Priority level (0-255, higher is more important)
     pub priority: u8,
@@ -175,6 +176,16 @@ impl Pdu {
     /// Checks if this is a management PDU
     pub fn is_management(&self) -> bool {
         self.pdu_type == PduType::Management
+    }
+
+    /// Serializes the PDU to bytes using bincode
+    pub fn serialize(&self) -> Result<Vec<u8>, String> {
+        bincode::serialize(self).map_err(|e| format!("Failed to serialize PDU: {}", e))
+    }
+
+    /// Deserializes a PDU from bytes using bincode
+    pub fn deserialize(data: &[u8]) -> Result<Self, String> {
+        bincode::deserialize(data).map_err(|e| format!("Failed to deserialize PDU: {}", e))
     }
 }
 

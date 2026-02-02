@@ -4,15 +4,21 @@
 //! IPCP Enrolment
 //!
 //! Handles the enrolment process where a new IPCP joins a DIF.
-//! Includes state synchronization and RIB replication.
+//! Fully async implementation with timeout and retry logic.
 
-use crate::cdap::{CdapMessage, CdapOpCode, CdapSession};
-use crate::efcp::{Efcp, FlowConfig};
-use crate::rib::Rib;
+use crate::cdap::{CdapMessage, CdapOpCode};
+use crate::pdu::Pdu;
+use crate::rib::{Rib, RibValue};
 use crate::shim::UdpShim;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::time::{sleep, timeout};
+
+const ENROLMENT_TIMEOUT: Duration = Duration::from_secs(30);
+const MAX_RETRY_ATTEMPTS: u32 = 3;
+const RETRY_BACKOFF_MS: u64 = 1000;
 
 /// Enrolment state
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,7 +85,7 @@ pub struct NeighborInfo {
     pub reachable: bool,
 }
 
-/// Enrolment manager
+/// Enrolment manager - fully async implementation
 #[derive(Debug)]
 pub struct EnrolmentManager {
     /// Current enrolment state
@@ -88,134 +94,25 @@ pub struct EnrolmentManager {
     ipcp_name: Option<String>,
     /// Local RIB
     rib: Rib,
+    /// UDP shim for network communication
+    shim: Arc<UdpShim>,
 }
 
 impl EnrolmentManager {
     /// Creates a new enrolment manager
-    pub fn new(rib: Rib) -> Self {
+    pub fn new(rib: Rib, shim: Arc<UdpShim>) -> Self {
         Self {
             state: EnrolmentState::NotEnrolled,
             ipcp_name: None,
             rib,
+            shim,
         }
     }
 
-    /// Initiates enrolment with a DIF
-    pub fn initiate_enrolment(
-        &mut self,
-        ipcp_name: String,
-        dif_name: String,
-        ipcp_address: u64,
-    ) -> EnrolmentRequest {
+    /// Sets the IPCP name
+    pub fn set_ipcp_name(&mut self, name: String) {
+        self.ipcp_name = Some(name);
         self.state = EnrolmentState::Initiated;
-        self.ipcp_name = Some(ipcp_name.clone());
-
-        EnrolmentRequest {
-            ipcp_name,
-            ipcp_address,
-            dif_name,
-            timestamp: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
-        }
-    }
-
-    /// Processes an enrolment request (called by accepting IPCP)
-    pub fn process_enrolment_request(
-        &self,
-        request: EnrolmentRequest,
-        dif_name: &str,
-        neighbors: Vec<NeighborInfo>,
-    ) -> EnrolmentResponse {
-        // Validate DIF name
-        if request.dif_name != dif_name {
-            return EnrolmentResponse {
-                accepted: false,
-                error: Some(format!(
-                    "DIF name mismatch: expected {}, got {}",
-                    dif_name, request.dif_name
-                )),
-                dif_config: None,
-            };
-        }
-
-        // Serialize the local RIB for the new member
-        let rib_snapshot = self.rib.serialize();
-
-        // Create DIF configuration
-        let config = DifConfiguration {
-            dif_name: dif_name.to_string(),
-            assigned_address: request.ipcp_address,
-            neighbors,
-            rib_snapshot,
-        };
-
-        EnrolmentResponse {
-            accepted: true,
-            error: None,
-            dif_config: Some(config),
-        }
-    }
-
-    /// Completes enrolment after receiving response
-    pub fn complete_enrolment(&mut self, response: EnrolmentResponse) -> Result<(), String> {
-        if !response.accepted {
-            self.state = EnrolmentState::Failed(
-                response
-                    .error
-                    .unwrap_or_else(|| "Unknown error".to_string()),
-            );
-            return Err("Enrolment rejected".to_string());
-        }
-
-        // Synchronize RIB
-        self.state = EnrolmentState::Synchronizing;
-
-        if let Some(config) = response.dif_config {
-            // Apply the RIB snapshot from the DIF
-            if !config.rib_snapshot.is_empty() {
-                match self.rib.deserialize(&config.rib_snapshot) {
-                    Ok(count) => {
-                        // Successfully synchronized RIB
-                        if count > 0 {
-                            // Objects were merged
-                        }
-                    }
-                    Err(e) => {
-                        self.state = EnrolmentState::Failed(format!("RIB sync failed: {}", e));
-                        return Err(format!("Failed to synchronize RIB: {}", e));
-                    }
-                }
-            }
-
-            // Add neighbors to the RIB
-            for neighbor in config.neighbors {
-                let neighbor_name = format!("neighbor/{}", neighbor.name);
-                let neighbor_data = crate::rib::RibValue::Struct(
-                    vec![
-                        (
-                            "address".to_string(),
-                            Box::new(crate::rib::RibValue::Integer(neighbor.address as i64)),
-                        ),
-                        (
-                            "reachable".to_string(),
-                            Box::new(crate::rib::RibValue::Boolean(neighbor.reachable)),
-                        ),
-                    ]
-                    .into_iter()
-                    .collect(),
-                );
-
-                // Create neighbor entry in RIB (ignore if already exists)
-                let _ = self
-                    .rib
-                    .create(neighbor_name, "neighbor".to_string(), neighbor_data);
-            }
-        }
-
-        self.state = EnrolmentState::Enrolled;
-        Ok(())
     }
 
     /// Returns the current enrolment state
@@ -228,253 +125,221 @@ impl EnrolmentManager {
         self.state == EnrolmentState::Enrolled
     }
 
-    /// Resets enrolment state
-    pub fn reset(&mut self) {
-        self.state = EnrolmentState::NotEnrolled;
-        self.ipcp_name = None;
-    }
+    /// Enrol with bootstrap IPCP with timeout and retry logic
+    pub async fn enrol_with_bootstrap(&mut self, bootstrap_addr: u64) -> Result<String, String> {
+        for attempt in 1..=MAX_RETRY_ATTEMPTS {
+            println!("Enrolment attempt {}/{}", attempt, MAX_RETRY_ATTEMPTS);
 
-    // ========== Network Enrolment Methods (Phase 1) ==========
+            match timeout(ENROLMENT_TIMEOUT, self.try_enrol(bootstrap_addr)).await {
+                Ok(Ok(dif_name)) => {
+                    println!("Successfully enrolled in DIF: {}", dif_name);
+                    return Ok(dif_name);
+                }
+                Ok(Err(e)) => {
+                    eprintln!("Enrolment attempt {} failed: {}", attempt, e);
+                }
+                Err(_) => {
+                    eprintln!("Enrolment attempt {} timed out", attempt);
+                }
+            }
 
-    /// Allocates a management flow to bootstrap IPCP for enrolment
-    pub fn allocate_management_flow(
-        &mut self,
-        _bootstrap_socket_addr: SocketAddr,
-        local_addr: u64,
-        bootstrap_rina_addr: u64,
-        efcp: &mut Efcp,
-        _shim: &UdpShim,
-    ) -> Result<u32, String> {
-        // Create management flow configuration with reliable, ordered delivery
-        let config = FlowConfig {
-            max_pdu_size: 1500,
-            window_size: 32,
-            reliable: true,
-            retransmit_timeout_ms: 2000,
-        };
-
-        // Allocate flow via EFCP
-        // Use temporary address 0 if not yet assigned
-        let src_addr = if local_addr == 0 { 0 } else { local_addr };
-        let flow_id = efcp.allocate_flow(src_addr, bootstrap_rina_addr, config);
-
-        // Store bootstrap address for sending via shim
-        // In a real implementation, we'd register this mapping in the shim
-        // For now, the socket address mapping will be handled by the caller
-
-        Ok(flow_id)
-    }
-
-    /// Sends enrolment request via CDAP over EFCP
-    pub fn send_enrolment_request(
-        &mut self,
-        flow_id: u32,
-        request: &EnrolmentRequest,
-        cdap: &mut CdapSession,
-        efcp: &mut Efcp,
-    ) -> Result<u64, String> {
-        // Serialize enrolment request
-        let request_json = serde_json::to_string(request)
-            .map_err(|e| format!("Failed to serialize enrolment request: {}", e))?;
-
-        // Create CDAP message for enrolment request
-        let cdap_msg = cdap.create_request(
-            "enrolment/request".to_string(),
-            "EnrolmentRequest".to_string(),
-            crate::rib::RibValue::String(request_json),
-        );
-
-        let invoke_id = cdap_msg.invoke_id;
-
-        // Serialize CDAP message
-        let cdap_json = serialize_cdap_message(&cdap_msg)?;
-
-        // Send via EFCP
-        let flow = efcp
-            .get_flow_mut(flow_id)
-            .ok_or_else(|| format!("Flow {} not found", flow_id))?;
-
-        let _pdu = flow.send_data(cdap_json.into_bytes())?;
-
-        self.state = EnrolmentState::Authenticating;
-        Ok(invoke_id)
-    }
-
-    /// Receives and processes enrolment response via CDAP over EFCP
-    pub fn receive_enrolment_response(
-        &mut self,
-        flow_id: u32,
-        _expected_invoke_id: u64,
-        efcp: &mut Efcp,
-    ) -> Result<EnrolmentResponse, String> {
-        // Note: In a real implementation, this would be async and wait for data
-        // For now, this is a synchronous placeholder that should be called
-        // when data is available on the flow
-
-        // Get flow and check if data is available in receive buffer
-        let _flow = efcp
-            .get_flow_mut(flow_id)
-            .ok_or_else(|| format!("Flow {} not found", flow_id))?;
-
-        // In a real implementation, we'd wait for PDU reception
-        // For now, return an error indicating data not yet received
-        // This will be properly implemented with async/await in Phase 2
-
-        Err("Response not yet available (async implementation pending)".to_string())
-    }
-
-    /// Processes incoming enrolment request from member IPCP (bootstrap side)
-    pub fn handle_enrolment_request(
-        &self,
-        flow_id: u32,
-        cdap_msg: &CdapMessage,
-        dif_name: &str,
-        neighbors: Vec<NeighborInfo>,
-        _cdap: &mut CdapSession,
-        efcp: &mut Efcp,
-    ) -> Result<(), String> {
-        // Verify this is an enrolment request
-        if cdap_msg.obj_name != "enrolment/request" {
-            return Err(format!(
-                "Expected enrolment/request, got {}",
-                cdap_msg.obj_name
-            ));
+            if attempt < MAX_RETRY_ATTEMPTS {
+                let backoff = Duration::from_millis(RETRY_BACKOFF_MS * (1 << (attempt - 1)));
+                println!("Retrying in {:?}...", backoff);
+                sleep(backoff).await;
+            }
         }
 
-        // Extract enrolment request from CDAP message
-        let request_json = cdap_msg
+        Err(format!(
+            "Enrolment failed after {} attempts",
+            MAX_RETRY_ATTEMPTS
+        ))
+    }
+
+    /// Single enrolment attempt
+    async fn try_enrol(&mut self, bootstrap_addr: u64) -> Result<String, String> {
+        let ipcp_name = self.ipcp_name.as_ref().ok_or("IPCP name not set")?.clone();
+
+        // Create enrolment request CDAP message
+        let cdap_msg = CdapMessage {
+            op_code: CdapOpCode::Create,
+            obj_name: ipcp_name.clone(),
+            obj_class: Some("enrolment".to_string()),
+            obj_value: Some(RibValue::String(ipcp_name.clone())),
+            invoke_id: 1,
+            result: 0,
+            result_reason: None,
+        };
+
+        // Serialize CDAP message with bincode
+        let cdap_bytes = bincode::serialize(&cdap_msg)
+            .map_err(|e| format!("Failed to serialize CDAP message: {}", e))?;
+
+        // Create PDU with CDAP payload
+        let pdu = Pdu::new_data(
+            0,              // src_addr - member doesn't have address yet
+            bootstrap_addr, // dst_addr
+            0,              // src_cep_id
+            0,              // dst_cep_id
+            0,              // sequence_num
+            cdap_bytes,     // payload
+        );
+
+        // Send enrolment request
+        self.shim
+            .send_pdu(&pdu)
+            .map_err(|e| format!("Failed to send enrolment request: {}", e))?;
+
+        println!("Sent enrolment request to bootstrap IPCP");
+
+        // Wait for response
+        let response = self.receive_response().await?;
+
+        // Extract DIF name from response
+        let dif_name = response
             .obj_value
             .as_ref()
             .and_then(|v| v.as_string())
-            .ok_or("Missing enrolment request data")?;
+            .ok_or("Response does not contain DIF name")?
+            .to_string();
 
-        let request: EnrolmentRequest = serde_json::from_str(request_json)
-            .map_err(|e| format!("Failed to parse enrolment request: {}", e))?;
+        // Update state
+        self.state = EnrolmentState::Enrolled;
 
-        // Process the request
-        let response = self.process_enrolment_request(request, dif_name, neighbors);
+        // Store DIF name in RIB
+        let _ = self.rib.create(
+            "/dif/name".to_string(),
+            "dif_info".to_string(),
+            RibValue::String(dif_name.clone()),
+        );
+
+        Ok(dif_name)
+    }
+
+    /// Receive enrolment response with polling
+    async fn receive_response(&self) -> Result<CdapMessage, String> {
+        let poll_interval = Duration::from_millis(100);
+        let max_polls = (ENROLMENT_TIMEOUT.as_millis() / poll_interval.as_millis()) as u32;
+
+        for _ in 0..max_polls {
+            if let Some((pdu, _src_addr)) = self
+                .shim
+                .receive_pdu()
+                .map_err(|e| format!("Failed to receive PDU: {}", e))?
+            {
+                // Deserialize CDAP message from PDU payload
+                let cdap_msg: CdapMessage = bincode::deserialize(&pdu.payload)
+                    .map_err(|e| format!("Failed to deserialize CDAP message: {}", e))?;
+
+                // Check if this is an enrolment response
+                if cdap_msg.obj_class.as_deref() == Some("enrolment") {
+                    if cdap_msg.result == 0 {
+                        return Ok(cdap_msg);
+                    } else {
+                        return Err(format!("Enrolment rejected with code: {}", cdap_msg.result));
+                    }
+                }
+            }
+
+            sleep(poll_interval).await;
+        }
+
+        Err("No enrolment response received".to_string())
+    }
+
+    /// Handle incoming enrolment request (bootstrap side)
+    pub async fn handle_enrolment_request(
+        &self,
+        pdu: &Pdu,
+        src_socket_addr: SocketAddr,
+    ) -> Result<(), String> {
+        // Register the peer mapping so we can send response back
+        self.shim.register_peer(pdu.src_addr, src_socket_addr);
+
+        // Deserialize CDAP message from PDU payload
+        let cdap_msg: CdapMessage = bincode::deserialize(&pdu.payload)
+            .map_err(|e| format!("Failed to deserialize CDAP message: {}", e))?;
+
+        // Check if this is an enrolment request
+        if cdap_msg.obj_class.as_deref() != Some("enrolment")
+            || cdap_msg.op_code != CdapOpCode::Create
+        {
+            return Err("Not an enrolment request".to_string());
+        }
+
+        let requesting_ipcp = cdap_msg
+            .obj_value
+            .as_ref()
+            .and_then(|v| v.as_string())
+            .ok_or("Request does not contain IPCP name")?
+            .to_string();
+
+        println!("Received enrolment request from: {}", requesting_ipcp);
+
+        // Get DIF name from RIB
+        let dif_name_obj = self
+            .rib
+            .read("/dif/name")
+            .ok_or("Bootstrap DIF name not set in RIB")?;
+        let dif_name = dif_name_obj
+            .value
+            .as_string()
+            .ok_or("DIF name is not a string")?
+            .to_string();
+
+        // Create response CDAP message
+        let response = CdapMessage {
+            op_code: CdapOpCode::Create,
+            obj_name: requesting_ipcp.clone(),
+            obj_class: Some("enrolment".to_string()),
+            obj_value: Some(RibValue::String(dif_name.clone())),
+            invoke_id: cdap_msg.invoke_id,
+            result: 0, // Success
+            result_reason: None,
+        };
 
         // Serialize response
-        let response_json = serde_json::to_string(&response)
-            .map_err(|e| format!("Failed to serialize enrolment response: {}", e))?;
+        let response_bytes = bincode::serialize(&response)
+            .map_err(|e| format!("Failed to serialize response: {}", e))?;
 
-        // Create CDAP response
-        let mut cdap_response = CdapMessage::new_response(cdap_msg.invoke_id, 0, None);
-        cdap_response.obj_value = Some(crate::rib::RibValue::String(response_json));
-        cdap_response.obj_name = "enrolment/response".to_string();
-        cdap_response.op_code = CdapOpCode::Create;
+        // Create response PDU
+        let response_pdu = Pdu::new_data(
+            0,              // src_addr
+            pdu.src_addr,   // dst_addr - respond to sender
+            0,              // src_cep_id
+            0,              // dst_cep_id
+            0,              // sequence_num
+            response_bytes, // payload
+        );
 
-        // Serialize and send response
-        let response_data = serialize_cdap_message(&cdap_response)?;
+        // Send response
+        self.shim
+            .send_pdu(&response_pdu)
+            .map_err(|e| format!("Failed to send enrolment response: {}", e))?;
 
-        let flow = efcp
-            .get_flow_mut(flow_id)
-            .ok_or_else(|| format!("Flow {} not found", flow_id))?;
-
-        flow.send_data(response_data.into_bytes())?;
+        println!(
+            "Sent enrolment response to {} with DIF name: {}",
+            requesting_ipcp, dif_name
+        );
 
         Ok(())
     }
-}
-
-// ========== CDAP Serialization Helpers ==========
-
-/// Serializes a CDAP message to JSON format
-fn serialize_cdap_message(msg: &CdapMessage) -> Result<String, String> {
-    // Create a simplified representation for serialization
-    let simplified = serde_json::json!({
-        "op_code": format!("{:?}", msg.op_code),
-        "obj_name": msg.obj_name,
-        "obj_class": msg.obj_class,
-        "obj_value": msg.obj_value.as_ref().map(|v| format!("{:?}", v)),
-        "invoke_id": msg.invoke_id,
-        "result": msg.result,
-        "result_reason": msg.result_reason,
-    });
-
-    serde_json::to_string(&simplified)
-        .map_err(|e| format!("Failed to serialize CDAP message: {}", e))
-}
-
-/// Deserializes a CDAP message from JSON format
-#[allow(dead_code)]
-fn deserialize_cdap_message(_data: &str) -> Result<CdapMessage, String> {
-    // This is a placeholder - proper implementation would parse JSON
-    // and reconstruct the CDAP message
-    Err("CDAP deserialization not yet fully implemented".to_string())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_enrolment_initiate() {
+    #[tokio::test]
+    async fn test_enrolment_state() {
         let rib = Rib::new();
-        let mut em = EnrolmentManager::new(rib);
+        let shim = Arc::new(UdpShim::new(0));
+        let mut em = EnrolmentManager::new(rib, shim);
 
-        let request = em.initiate_enrolment("ipcp-1".to_string(), "dif-1".to_string(), 1000);
+        assert_eq!(*em.state(), EnrolmentState::NotEnrolled);
+        assert!(!em.is_enrolled());
 
-        assert_eq!(request.ipcp_name, "ipcp-1");
-        assert_eq!(request.dif_name, "dif-1");
+        em.set_ipcp_name("ipcp-1".to_string());
         assert_eq!(*em.state(), EnrolmentState::Initiated);
-    }
-
-    #[test]
-    fn test_enrolment_process_request() {
-        let rib = Rib::new();
-        let em = EnrolmentManager::new(rib);
-
-        let request = EnrolmentRequest {
-            ipcp_name: "ipcp-1".to_string(),
-            ipcp_address: 1000,
-            dif_name: "dif-1".to_string(),
-            timestamp: 0,
-        };
-
-        let response = em.process_enrolment_request(request, "dif-1", vec![]);
-
-        assert!(response.accepted);
-        assert!(response.dif_config.is_some());
-    }
-
-    #[test]
-    fn test_enrolment_dif_mismatch() {
-        let rib = Rib::new();
-        let em = EnrolmentManager::new(rib);
-
-        let request = EnrolmentRequest {
-            ipcp_name: "ipcp-1".to_string(),
-            ipcp_address: 1000,
-            dif_name: "dif-1".to_string(),
-            timestamp: 0,
-        };
-
-        let response = em.process_enrolment_request(request, "dif-2", vec![]);
-
-        assert!(!response.accepted);
-        assert!(response.error.is_some());
-    }
-
-    #[test]
-    fn test_enrolment_complete() {
-        let rib = Rib::new();
-        let mut em = EnrolmentManager::new(rib);
-
-        let config = DifConfiguration {
-            dif_name: "dif-1".to_string(),
-            assigned_address: 1000,
-            neighbors: vec![],
-            rib_snapshot: vec![],
-        };
-
-        let response = EnrolmentResponse {
-            accepted: true,
-            error: None,
-            dif_config: Some(config),
-        };
-
-        em.complete_enrolment(response).unwrap();
-        assert!(em.is_enrolled());
     }
 }

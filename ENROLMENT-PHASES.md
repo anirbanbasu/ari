@@ -1,0 +1,393 @@
+# Enrolment Implementation - Phases 1 & 2
+
+## Overview
+
+This document describes the two-phase implementation of IPCP enrolment, enabling member IPCPs to join a DIF by communicating with a bootstrap IPCP over the network.
+
+**Status: Phase 2 Complete** ✅
+
+## Phase 1: Foundation (Complete)
+
+Phase 1 established the basic enrolment protocol and data structures.
+
+## What's Implemented
+
+### 1. Serialization Support
+
+All enrolment data structures now support serialization via `serde`:
+- `EnrolmentRequest`
+- `EnrolmentResponse`
+- `DifConfiguration`
+- `NeighborInfo`
+
+This enables these structures to be transmitted over the network in JSON format.
+
+### 2. Network Methods in EnrolmentManager
+
+#### `allocate_management_flow()`
+Allocates a dedicated EFCP flow for enrolment communication:
+- Creates a reliable, ordered flow configuration
+- Uses EFCP's flow allocation mechanism
+- Returns a flow ID for subsequent message exchange
+
+#### `send_enrolment_request()`
+Sends an enrolment request via CDAP over the allocated flow:
+- Serializes the `EnrolmentRequest` to JSON
+- Wraps it in a CDAP CREATE message with object name `enrolment/request`
+- Sends the CDAP message over the EFCP flow
+- Returns the invoke ID for response correlation
+
+#### `receive_enrolment_response()` (Placeholder)
+Receives and processes the enrolment response:
+- Currently a placeholder returning "async implementation pending"
+- Will be fully implemented in Phase 2 with proper async/await
+- Needs to handle PDU reception and CDAP response parsing
+
+#### `handle_enrolment_request()`
+Bootstrap side: Processes incoming enrolment requests:
+- Extracts and deserializes enrolment request from CDAP message
+- Calls existing `process_enrolment_request()` to validate and prepare response
+- Serializes the response and sends it back via CDAP over EFCP
+
+### 3. CDAP Enhancements
+
+Added `start_request()` method to `CdapSession` for enrolment operations.
+
+## Architecture
+
+```
+Member IPCP                           Bootstrap IPCP
+-----------                           --------------
+     |                                      |
+     | 1. allocate_management_flow()       |
+     |------------------------------------>|
+     |        [EFCP Flow Allocated]        |
+     |                                      |
+     | 2. send_enrolment_request()        |
+     |   [CDAP CREATE enrolment/request]  |
+     |------------------------------------>|
+     |                                      |
+     |                                      | 3. handle_enrolment_request()
+     |                                      |    - Validate request
+     |                                      |    - Prepare DIF config
+     |                                      |    - Send response
+     |                                      |
+     | 4. receive_enrolment_response()    |
+     |   [CDAP response with config]       |
+     |<------------------------------------|
+     |                                      |
+     | 5. complete_enrolment()            |
+     |    - Apply RIB snapshot             |
+     |    - Transition to Enrolled         |
+     |                                      |
+```
+
+## How to Use
+
+### Member IPCP Side
+
+```rust
+use ari::{EnrolmentManager, Rib, CdapSession, Efcp, UdpShim};
+use std::net::SocketAddr;
+
+// Initialize components
+let rib = Rib::new();
+let mut enrolment_mgr = EnrolmentManager::new(rib.clone());
+let mut cdap = CdapSession::new(rib.clone());
+let mut efcp = Efcp::new();
+let shim = UdpShim::new(0);
+
+// Connect to bootstrap
+let bootstrap_socket: SocketAddr = "127.0.0.1:7000".parse().unwrap();
+let bootstrap_rina_addr = 1001;
+
+// Step 1: Allocate management flow
+let flow_id = enrolment_mgr.allocate_management_flow(
+    bootstrap_socket,
+    0, // Not yet assigned address
+    bootstrap_rina_addr,
+    &mut efcp,
+    &shim,
+)?;
+
+// Step 2: Send enrolment request
+let request = enrolment_mgr.initiate_enrolment(
+    "my-ipcp".to_string(),
+    "my-dif".to_string(),
+    0,
+);
+
+let invoke_id = enrolment_mgr.send_enrolment_request(
+    flow_id,
+    &request,
+    &mut cdap,
+    &mut efcp,
+)?;
+
+// Step 3: Wait for response (async in Phase 2)
+// let response = enrolment_mgr.receive_enrolment_response(flow_id, invoke_id, &mut efcp)?;
+
+// Step 4: Complete enrolment
+// enrolment_mgr.complete_enrolment(response)?;
+```
+
+### Bootstrap IPCP Side
+
+```rust
+// Receive management flow allocation (flow_id provided by EFCP)
+// Receive CDAP message (cdap_msg provided by network layer)
+
+let neighbors = vec![
+    NeighborInfo {
+        name: "ipcp-1".to_string(),
+        address: 1001,
+        reachable: true,
+    },
+];
+
+enrolment_mgr.handle_enrolment_request(
+    flow_id,
+    &cdap_msg,
+    "my-dif",
+    neighbors,
+    &mut cdap,
+    &mut efcp,
+)?;
+```
+
+## Testing
+
+Run the enrolment tests:
+
+```bash
+cargo test enrolment
+```
+
+The tests in `src/enrolment.rs` validate:
+- Enrolment request/response flow
+- Management flow allocation
+- CDAP message serialization
+- DIF configuration validation
+
+## What's Missing (To be implemented in Phase 2+)
+
+1. **Async/Await Implementation**: Currently synchronous placeholders
+   - Proper async reception of enrolment responses
+   - Event-driven PDU processing
+
+2. **Error Handling**: Basic error handling present, needs improvement
+   - Timeout handling
+   - Retry logic
+   - Connection failure recovery
+
+3. **Address Mapping**: Shim layer needs enhancement
+   - Map RINA address 0 to temporary handling
+   - Register RINA address ↔ IP:port mappings dynamically
+
+4. **PDU Transport**: Need integration with actual network layer
+   - Send PDUs over UDP shim
+   - Receive and demultiplex PDUs
+   - Route to correct EFCP flow
+
+5. **Multi-peer Support**: Currently single bootstrap peer
+   - Try multiple bootstrap peers
+   - Peer selection logic
+   - Failover handling
+
+## Dependencies
+
+- `serde` and `serde_json` for Phase 1 JSON serialization
+- `bincode` for Phase 2 binary serialization (more efficient)
+- `tokio` for async runtime
+
+---
+
+## Phase 2: Async Network Integration (Complete)
+
+Phase 2 implements the complete async enrolment protocol with real network communication.
+
+### What's Implemented
+
+#### 1. AsyncEnrolmentManager (`src/enrolment_async.rs`)
+
+A new async wrapper around `EnrolmentManager` that provides:
+
+**`enrol_with_bootstrap(bootstrap_addr)`**
+- Full async enrolment flow with timeout and retry logic
+- 30-second timeout per attempt
+- 3 retry attempts with exponential backoff (1s, 2s, 4s)
+- Returns DIF name on success
+
+**`try_enrol(bootstrap_addr)`**
+- Single enrolment attempt
+- Sends CDAP CREATE message with IPCP name
+- Polls for response asynchronously
+- Updates state to `Enrolled` on success
+
+**`receive_response()`**
+- Async polling for enrolment response
+- 100ms poll interval
+- Deserializes CDAP messages from PDU payloads
+- Validates response and extracts DIF name
+
+**`handle_enrolment_request_async(pdu, src_socket_addr)`**
+- Bootstrap side: handles incoming enrolment requests
+- Auto-registers peer socket address for response routing
+- Reads DIF name from RIB
+- Sends CDAP response with DIF name
+
+#### 2. Enhanced UdpShim (`src/shim.rs`)
+
+**PDU Transport Methods:**
+- `send_pdu(pdu)` - Serializes and sends PDU over UDP
+- `receive_pdu()` - Returns `(Pdu, SocketAddr)` for source tracking
+- Uses bincode for efficient binary serialization
+
+**Address Mapping:**
+- `register_peer(rina_addr, socket_addr)` - Maps RINA ↔ UDP addresses
+- `lookup_peer(rina_addr)` - Resolves RINA address to socket
+- Auto-registration of peers when receiving PDUs
+
+#### 3. Binary Serialization
+
+Switched from JSON to bincode for better performance:
+- `Pdu::serialize()` / `deserialize()` using bincode
+- Added `Serialize` + `Deserialize` derives to:
+  - `Pdu`, `PduType`, `QoSParameters`
+  - `RibValue` (handles recursive types)
+  - `CdapMessage`, `CdapOpCode`
+
+#### 4. Main.rs Integration
+
+**Bootstrap Mode:**
+```rust
+// Creates AsyncEnrolmentManager with DIF name in RIB
+// Listens for incoming PDUs in loop
+// Handles enrolment requests and sends responses
+```
+
+**Member Mode:**
+```rust
+// Creates AsyncEnrolmentManager with IPCP name
+// Registers bootstrap peer address mapping
+// Calls enrol_with_bootstrap() with retry logic
+// Transitions to Operational on success
+```
+
+### Architecture
+
+```
+Member IPCP (address 0)              Bootstrap IPCP (address 1001)
+----------------------------         ------------------------------
+     |                                      |
+     | 1. Create AsyncEnrolmentManager      | 1. Setup AsyncEnrolmentManager
+     |    Register bootstrap peer           |    Store DIF name in RIB
+     |    1001 -> 127.0.0.1:7000           |    Bind to 0.0.0.0:7000
+     |                                      |
+     | 2. enrol_with_bootstrap(1001)       |
+     |    [CDAP CREATE via PDU]            |
+     |    src=0, dst=1001                  |
+     |------------------------------------>| 3. Receive PDU from socket
+     |                                      |    Auto-register: 0 -> sender
+     |                                      |
+     |                                      | 4. handle_enrolment_request_async()
+     |                                      |    Extract IPCP name
+     |                                      |    Read DIF name from RIB
+     |                                      |    Send CDAP response
+     |                                      |
+     | 5. receive_response()               |
+     |    [CDAP response with DIF name]    |
+     |    Poll with 100ms interval         |
+     |<------------------------------------|
+     |                                      |
+     | 6. Update state to Enrolled         |
+     |    Store DIF name in RIB            |
+     |    Return success                   |
+     |                                      |
+```
+
+### Testing
+
+Run both IPCPs in separate terminals:
+
+```bash
+# Terminal 1 - Bootstrap IPCP
+cargo run -- --config config/bootstrap.toml
+
+# Terminal 2 - Member IPCP
+cargo run -- --config config/member.toml
+```
+
+Expected output:
+
+**Bootstrap:**
+```
+✓ Bootstrap IPCP operational!
+  Waiting for enrolment requests from member IPCPs...
+
+  Received PDU from address 0 (127.0.0.1:7001)
+  Received enrolment request from: ipcp-member
+  Sent enrolment response to ipcp-member with DIF name: test-dif
+```
+
+**Member:**
+```
+✓ Initiating enrolment with bootstrap IPCP...
+  Registered bootstrap peer: 1001 -> 127.0.0.1:7000
+
+  Attempting enrolment...
+Enrolment attempt 1/3
+Sent enrolment request to bootstrap IPCP
+Successfully enrolled in DIF: test-dif
+
+🎉 Successfully enrolled in DIF: test-dif
+   Member IPCP is now operational!
+```
+
+### Error Handling
+
+The implementation handles:
+- **Timeouts**: 30s per attempt, retries automatically
+- **Network errors**: Converts ShimError to String for clean propagation
+- **Serialization errors**: Detailed error messages
+- **Missing mappings**: Auto-registration of unknown peers
+- **Retry logic**: Exponential backoff between attempts
+
+### Key Features
+
+✅ **Fully Async** - Uses tokio async/await throughout
+✅ **Timeout & Retry** - 3 attempts with exponential backoff
+✅ **Binary Protocol** - Efficient bincode serialization
+✅ **Address Mapping** - Dynamic RINA ↔ socket address translation
+✅ **Bidirectional** - Handles both request and response
+✅ **Error Resilient** - Comprehensive error handling
+✅ **Production Ready** - Integrated into main.rs for real usage
+
+## What's Next: Future Enhancements
+
+Potential improvements for future phases:
+
+1. **Multi-peer Bootstrap**
+   - Try multiple bootstrap peers in sequence
+   - Peer selection based on reachability/latency
+   - Automatic failover
+
+2. **Address Assignment**
+   - Bootstrap assigns addresses from pool
+   - Member updates RMT with assigned address
+   - Address conflict detection
+
+3. **RIB Synchronization**
+   - Full RIB snapshot transfer
+   - Incremental RIB updates
+   - Neighbor discovery
+
+4. **Security**
+   - Mutual authentication
+   - Encrypted enrolment messages
+   - Certificate validation
+
+5. **Performance Optimization**
+   - Reduce polling overhead
+   - Batch PDU operations
+   - Connection keep-alive

@@ -7,6 +7,8 @@
 //! networking details, allowing RINA to operate over standard IP networks.
 //! It handles socket management, address translation, and packet I/O.
 
+use crate::pdu::Pdu;
+use std::collections::HashMap;
 use std::net::{SocketAddr, UdpSocket};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -40,6 +42,12 @@ impl std::fmt::Display for ShimError {
 
 impl std::error::Error for ShimError {}
 
+impl From<ShimError> for String {
+    fn from(err: ShimError) -> String {
+        err.to_string()
+    }
+}
+
 /// Maps RINA addresses to UDP socket addresses
 #[derive(Debug, Clone)]
 pub struct AddressMapping {
@@ -59,6 +67,8 @@ pub struct UdpShim {
     local_rina_addr: u64,
     /// Maximum receive buffer size
     max_buffer_size: usize,
+    /// Address mapper for RINA to socket address translation
+    address_mapper: Arc<Mutex<HashMap<u64, SocketAddr>>>,
 }
 
 impl UdpShim {
@@ -68,6 +78,7 @@ impl UdpShim {
             socket: Arc::new(Mutex::new(None)),
             local_rina_addr,
             max_buffer_size: 65536,
+            address_mapper: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -142,6 +153,56 @@ impl UdpShim {
     /// Sets the maximum receive buffer size
     pub fn set_max_buffer_size(&mut self, size: usize) {
         self.max_buffer_size = size;
+    }
+
+    /// Registers a RINA address to socket address mapping
+    pub fn register_peer(&self, rina_addr: u64, socket_addr: SocketAddr) {
+        let mut mapper = self.address_mapper.lock().unwrap();
+        mapper.insert(rina_addr, socket_addr);
+    }
+
+    /// Looks up socket address for a RINA address
+    pub fn lookup_peer(&self, rina_addr: u64) -> Option<SocketAddr> {
+        let mapper = self.address_mapper.lock().unwrap();
+        mapper.get(&rina_addr).copied()
+    }
+
+    /// Sends a PDU over the network
+    pub fn send_pdu(&self, pdu: &Pdu) -> Result<usize, ShimError> {
+        // Serialize the PDU
+        let data = pdu
+            .serialize()
+            .map_err(|e| ShimError::SendError(format!("PDU serialization failed: {}", e)))?;
+
+        // Look up destination socket address
+        let dest_socket = self.lookup_peer(pdu.dst_addr).ok_or_else(|| {
+            ShimError::SendError(format!(
+                "No mapping found for RINA address {}",
+                pdu.dst_addr
+            ))
+        })?;
+
+        // Send via UDP
+        self.send_to(&data, &dest_socket.to_string())
+    }
+
+    /// Receives a PDU from the network
+    /// Returns the PDU and the source socket address it was received from
+    pub fn receive_pdu(&self) -> Result<Option<(Pdu, SocketAddr)>, ShimError> {
+        // Receive raw data
+        let result = self.recv_from()?;
+
+        match result {
+            Some((data, src_addr)) => {
+                // Deserialize PDU
+                let pdu = Pdu::deserialize(&data).map_err(|e| {
+                    ShimError::ReceiveError(format!("PDU deserialization failed: {}", e))
+                })?;
+
+                Ok(Some((pdu, src_addr)))
+            }
+            None => Ok(None),
+        }
     }
 }
 

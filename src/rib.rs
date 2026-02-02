@@ -13,6 +13,7 @@
 //!
 //! The RIB is distributed across all IPCPs in a DIF and kept consistent through CDAP.
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -33,7 +34,7 @@ pub struct RibObject {
 }
 
 /// Represents different types of values that can be stored in the RIB
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum RibValue {
     String(String),
     Integer(i64),

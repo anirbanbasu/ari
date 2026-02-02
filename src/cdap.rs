@@ -8,10 +8,11 @@
 //! distributed state: CREATE, DELETE, READ, WRITE, START, STOP.
 
 use crate::rib::{Rib, RibValue};
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// CDAP operation types
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CdapOpCode {
     /// Create a new object
     Create,
@@ -41,7 +42,7 @@ impl fmt::Display for CdapOpCode {
 }
 
 /// CDAP message for distributed operations
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CdapMessage {
     /// Operation code
     pub op_code: CdapOpCode,

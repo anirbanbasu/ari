@@ -30,7 +30,10 @@ pub use actors::{
 pub use cdap::{CdapMessage, CdapOpCode, CdapSession};
 pub use directory::Directory;
 pub use efcp::{Efcp, Flow, FlowConfig};
-pub use enrolment::{EnrolmentManager, EnrolmentState, NeighborInfo};
+pub use enrolment::{
+    DifConfiguration, EnrolmentManager, EnrolmentRequest, EnrolmentResponse, EnrolmentState,
+    NeighborInfo,
+};
 pub use fal::{AllocatedFlow, FlowAllocator, FlowState};
 pub use ipcp::{IpcProcess, IpcpState};
 pub use pdu::{Pdu, PduType, QoSParameters};
