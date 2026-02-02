@@ -25,10 +25,12 @@ cargo run -- --mode member --name ipcp-b --dif-name test-dif --bind 0.0.0.0:7001
 ```
 
 ### Documentation
+
+The current documentation is scattered and will be consolidated over time. For now, please refer to the following files.
 - **[RUNNING.md](RUNNING.md)** - Quick start and operational guide
 - **[CONFIG-EXAMPLES.md](CONFIG-EXAMPLES.md)** - Comprehensive configuration examples
 - **[CONFIG-SUMMARY.md](CONFIG-SUMMARY.md)** - Implementation details
-- **[ENROLMENT-PHASE1.md](ENROLMENT-PHASE1.md)** - Enrolment implementation guide (Phase 1)
+- **[ENROLMENT-PHASES.md](ENROLMENT-PHASES.md)** - Enrolment implementation guide
 
 ## Features
 
@@ -54,7 +56,7 @@ cargo run -- --mode member --name ipcp-b --dif-name test-dif --bind 0.0.0.0:7001
 
 The enrolment protocol will be implemented in phases to enable IPCPs to join a DIF:
 
-#### Phase 1: Network Enrolment Foundation ✅ (In Progress)
+#### Phase 1: Network Enrolment Foundation ✅ (Completed with basic functionality)
 - Extend `EnrolmentManager` with network capabilities
 - Allocate management flows via EFCP for enrolment
 - Send/receive CDAP enrolment messages over EFCP flows
