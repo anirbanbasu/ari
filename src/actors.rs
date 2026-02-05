@@ -69,12 +69,12 @@ impl RibActor {
                     response,
                 } => {
                     let rib = self.rib.read().await;
-                    let result = rib.create(name, class, value);
+                    let result = rib.create(name, class, value).await;
                     let _ = response.send(result).await;
                 }
                 RibMessage::Read { name, response } => {
                     let rib = self.rib.read().await;
-                    let obj = rib.read(&name);
+                    let obj = rib.read(&name).await;
                     let _ = response.send(obj.map(|o| o.value)).await;
                 }
                 RibMessage::Update {
@@ -83,22 +83,22 @@ impl RibActor {
                     response,
                 } => {
                     let rib = self.rib.read().await;
-                    let result = rib.update(&name, value);
+                    let result = rib.update(&name, value).await;
                     let _ = response.send(result).await;
                 }
                 RibMessage::Delete { name, response } => {
                     let rib = self.rib.read().await;
-                    let result = rib.delete(&name);
+                    let result = rib.delete(&name).await;
                     let _ = response.send(result).await;
                 }
                 RibMessage::ListByClass { class, response } => {
                     let rib = self.rib.read().await;
-                    let list = rib.list_by_class(&class);
+                    let list = rib.list_by_class(&class).await;
                     let _ = response.send(list).await;
                 }
                 RibMessage::Count { response } => {
                     let rib = self.rib.read().await;
-                    let count = rib.count();
+                    let count = rib.count().await;
                     let _ = response.send(count).await;
                 }
             }

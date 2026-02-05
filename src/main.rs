@@ -206,7 +206,7 @@ async fn run_demo_mode() {
     // === CDAP Operations ===
     println!("=== 2. Common Distributed Application Protocol (CDAP) ===");
     let read_msg = ipcp.cdap.read_request("neighbor/ipcp-1".to_string());
-    let response = ipcp.cdap.process_message(&read_msg);
+    let response = ipcp.cdap.process_message(&read_msg).await;
     println!("  CDAP READ request for 'neighbor/ipcp-1'");
     println!("  Response success: {}", response.is_success());
     if let Some(value) = response.obj_value {
@@ -498,6 +498,7 @@ async fn run_bootstrap_mode(config: IpcpConfiguration) {
         "dif_info".to_string(),
         RibValue::String(config.dif_name.clone()),
     )
+    .await
     .unwrap();
 
     let shim = Arc::new(UdpShim::new(local_addr));
@@ -509,8 +510,16 @@ async fn run_bootstrap_mode(config: IpcpConfiguration) {
     }
     println!("  Bound to: {}", config.bind_address);
 
-    let enrollment_mgr = EnrollmentManager::new(rib, shim.clone());
-    println!("  Enrollment manager ready");
+    let enrollment_config = ari::enrollment::EnrollmentConfig {
+        timeout: std::time::Duration::from_secs(config.enrollment_timeout_secs),
+        max_retries: config.enrollment_max_retries,
+        initial_backoff_ms: config.enrollment_initial_backoff_ms,
+    };
+    let enrollment_mgr = EnrollmentManager::with_config(rib, shim.clone(), enrollment_config);
+    println!(
+        "  Enrollment manager ready (timeout: {}s, retries: {})",
+        config.enrollment_timeout_secs, config.enrollment_max_retries
+    );
 
     println!("\n🎉 Bootstrap IPCP operational!");
     println!("   Waiting for enrollment requests from member IPCPs...\n");
@@ -601,9 +610,17 @@ async fn run_member_mode(config: IpcpConfiguration) {
     }
     println!("  Bound to: {}", config.bind_address);
 
-    let mut enrollment_mgr = EnrollmentManager::new(rib, shim.clone());
+    let enrollment_config = ari::enrollment::EnrollmentConfig {
+        timeout: std::time::Duration::from_secs(config.enrollment_timeout_secs),
+        max_retries: config.enrollment_max_retries,
+        initial_backoff_ms: config.enrollment_initial_backoff_ms,
+    };
+    let mut enrollment_mgr = EnrollmentManager::with_config(rib, shim.clone(), enrollment_config);
     enrollment_mgr.set_ipcp_name(config.name.clone());
-    println!("  Enrollment manager ready");
+    println!(
+        "  Enrollment manager ready (timeout: {}s, retries: {})",
+        config.enrollment_timeout_secs, config.enrollment_max_retries
+    );
 
     // Attempt enrollment with bootstrap peers
     println!("\n✓ Initiating enrollment with bootstrap IPCP...");

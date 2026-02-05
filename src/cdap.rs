@@ -185,12 +185,12 @@ impl CdapSession {
     }
 
     /// Processes an incoming CDAP message and returns a response
-    pub fn process_message(&self, msg: &CdapMessage) -> CdapMessage {
+    pub async fn process_message(&self, msg: &CdapMessage) -> CdapMessage {
         match msg.op_code {
-            CdapOpCode::Create => self.handle_create(msg),
-            CdapOpCode::Read => self.handle_read(msg),
-            CdapOpCode::Write => self.handle_write(msg),
-            CdapOpCode::Delete => self.handle_delete(msg),
+            CdapOpCode::Create => self.handle_create(msg).await,
+            CdapOpCode::Read => self.handle_read(msg).await,
+            CdapOpCode::Write => self.handle_write(msg).await,
+            CdapOpCode::Delete => self.handle_delete(msg).await,
             CdapOpCode::Start | CdapOpCode::Stop => {
                 // TODO: Implement START/STOP operations
                 CdapMessage::new_response(
@@ -202,7 +202,7 @@ impl CdapSession {
         }
     }
 
-    fn handle_create(&self, msg: &CdapMessage) -> CdapMessage {
+    async fn handle_create(&self, msg: &CdapMessage) -> CdapMessage {
         if msg.obj_class.is_none() || msg.obj_value.is_none() {
             return CdapMessage::new_response(
                 msg.invoke_id,
@@ -211,18 +211,22 @@ impl CdapSession {
             );
         }
 
-        match self.rib.create(
-            msg.obj_name.clone(),
-            msg.obj_class.clone().unwrap(),
-            msg.obj_value.clone().unwrap(),
-        ) {
+        match self
+            .rib
+            .create(
+                msg.obj_name.clone(),
+                msg.obj_class.clone().unwrap(),
+                msg.obj_value.clone().unwrap(),
+            )
+            .await
+        {
             Ok(_) => CdapMessage::new_response(msg.invoke_id, 0, None),
             Err(e) => CdapMessage::new_response(msg.invoke_id, -1, Some(e)),
         }
     }
 
-    fn handle_read(&self, msg: &CdapMessage) -> CdapMessage {
-        match self.rib.read(&msg.obj_name) {
+    async fn handle_read(&self, msg: &CdapMessage) -> CdapMessage {
+        match self.rib.read(&msg.obj_name).await {
             Some(obj) => {
                 let mut response = CdapMessage::new_response(msg.invoke_id, 0, None);
                 response.obj_value = Some(obj.value);
@@ -237,7 +241,7 @@ impl CdapSession {
         }
     }
 
-    fn handle_write(&self, msg: &CdapMessage) -> CdapMessage {
+    async fn handle_write(&self, msg: &CdapMessage) -> CdapMessage {
         if msg.obj_value.is_none() {
             return CdapMessage::new_response(
                 msg.invoke_id,
@@ -249,14 +253,15 @@ impl CdapSession {
         match self
             .rib
             .update(&msg.obj_name, msg.obj_value.clone().unwrap())
+            .await
         {
             Ok(_) => CdapMessage::new_response(msg.invoke_id, 0, None),
             Err(e) => CdapMessage::new_response(msg.invoke_id, -1, Some(e)),
         }
     }
 
-    fn handle_delete(&self, msg: &CdapMessage) -> CdapMessage {
-        match self.rib.delete(&msg.obj_name) {
+    async fn handle_delete(&self, msg: &CdapMessage) -> CdapMessage {
+        match self.rib.delete(&msg.obj_name).await {
             Ok(_) => CdapMessage::new_response(msg.invoke_id, 0, None),
             Err(e) => CdapMessage::new_response(msg.invoke_id, -1, Some(e)),
         }
@@ -289,8 +294,8 @@ mod tests {
         assert_eq!(msg.invoke_id, 1);
     }
 
-    #[test]
-    fn test_cdap_session_create_and_read() {
+    #[tokio::test]
+    async fn test_cdap_session_create_and_read() {
         let rib = Rib::new();
         let mut session = CdapSession::new(rib);
 
@@ -302,20 +307,20 @@ mod tests {
         );
 
         // Process the CREATE request
-        let create_response = session.process_message(&create_msg);
+        let create_response = session.process_message(&create_msg).await;
         assert!(create_response.is_success());
 
         // Create a READ request
         let read_msg = session.read_request("test/data".to_string());
 
         // Process the READ request
-        let read_response = session.process_message(&read_msg);
+        let read_response = session.process_message(&read_msg).await;
         assert!(read_response.is_success());
         assert_eq!(read_response.obj_value.unwrap().as_string(), Some("hello"));
     }
 
-    #[test]
-    fn test_cdap_write_operation() {
+    #[tokio::test]
+    async fn test_cdap_write_operation() {
         let rib = Rib::new();
         let mut session = CdapSession::new(rib);
 
@@ -325,21 +330,21 @@ mod tests {
             "config".to_string(),
             RibValue::Integer(0),
         );
-        session.process_message(&create_msg);
+        session.process_message(&create_msg).await;
 
         // Update the object
         let write_msg = session.write_request("counter".to_string(), RibValue::Integer(10));
-        let write_response = session.process_message(&write_msg);
+        let write_response = session.process_message(&write_msg).await;
         assert!(write_response.is_success());
 
         // Verify the update
         let read_msg = session.read_request("counter".to_string());
-        let read_response = session.process_message(&read_msg);
+        let read_response = session.process_message(&read_msg).await;
         assert_eq!(read_response.obj_value.unwrap().as_integer(), Some(10));
     }
 
-    #[test]
-    fn test_cdap_delete_operation() {
+    #[tokio::test]
+    async fn test_cdap_delete_operation() {
         let rib = Rib::new();
         let mut session = CdapSession::new(rib);
 
@@ -349,16 +354,16 @@ mod tests {
             "temp".to_string(),
             RibValue::Boolean(true),
         );
-        session.process_message(&create_msg);
+        session.process_message(&create_msg).await;
 
         // Delete the object
         let delete_msg = session.delete_request("temp".to_string());
-        let delete_response = session.process_message(&delete_msg);
+        let delete_response = session.process_message(&delete_msg).await;
         assert!(delete_response.is_success());
 
         // Verify it's gone
         let read_msg = session.read_request("temp".to_string());
-        let read_response = session.process_message(&read_msg);
+        let read_response = session.process_message(&read_msg).await;
         assert!(!read_response.is_success());
     }
 

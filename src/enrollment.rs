@@ -16,9 +16,26 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::{sleep, timeout};
 
-const ENROLLMENT_TIMEOUT: Duration = Duration::from_secs(30);
-const MAX_RETRY_ATTEMPTS: u32 = 3;
-const RETRY_BACKOFF_MS: u64 = 1000;
+/// Configuration for enrollment behavior
+#[derive(Debug, Clone)]
+pub struct EnrollmentConfig {
+    /// Timeout for a single enrollment attempt
+    pub timeout: Duration,
+    /// Maximum number of retry attempts
+    pub max_retries: u32,
+    /// Initial backoff duration in milliseconds (doubles on each retry)
+    pub initial_backoff_ms: u64,
+}
+
+impl Default for EnrollmentConfig {
+    fn default() -> Self {
+        Self {
+            timeout: Duration::from_secs(5),
+            max_retries: 3,
+            initial_backoff_ms: 1000,
+        }
+    }
+}
 
 /// Enrollment state
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,16 +113,24 @@ pub struct EnrollmentManager {
     rib: Rib,
     /// UDP shim for network communication
     shim: Arc<UdpShim>,
+    /// Enrollment configuration
+    config: EnrollmentConfig,
 }
 
 impl EnrollmentManager {
     /// Creates a new enrollment manager
     pub fn new(rib: Rib, shim: Arc<UdpShim>) -> Self {
+        Self::with_config(rib, shim, EnrollmentConfig::default())
+    }
+
+    /// Creates a new enrollment manager with custom configuration
+    pub fn with_config(rib: Rib, shim: Arc<UdpShim>, config: EnrollmentConfig) -> Self {
         Self {
             state: EnrollmentState::NotEnrolled,
             ipcp_name: None,
             rib,
             shim,
+            config,
         }
     }
 
@@ -127,10 +152,10 @@ impl EnrollmentManager {
 
     /// Enrol with bootstrap IPCP with timeout and retry logic
     pub async fn enrol_with_bootstrap(&mut self, bootstrap_addr: u64) -> Result<String, String> {
-        for attempt in 1..=MAX_RETRY_ATTEMPTS {
-            println!("Enrollment attempt {}/{}", attempt, MAX_RETRY_ATTEMPTS);
+        for attempt in 1..=self.config.max_retries {
+            println!("Enrollment attempt {}/{}", attempt, self.config.max_retries);
 
-            match timeout(ENROLLMENT_TIMEOUT, self.try_enrol(bootstrap_addr)).await {
+            match timeout(self.config.timeout, self.try_enrol(bootstrap_addr)).await {
                 Ok(Ok(dif_name)) => {
                     println!("Successfully enrolled in DIF: {}", dif_name);
                     return Ok(dif_name);
@@ -143,8 +168,9 @@ impl EnrollmentManager {
                 }
             }
 
-            if attempt < MAX_RETRY_ATTEMPTS {
-                let backoff = Duration::from_millis(RETRY_BACKOFF_MS * (1 << (attempt - 1)));
+            if attempt < self.config.max_retries {
+                let backoff =
+                    Duration::from_millis(self.config.initial_backoff_ms * (1 << (attempt - 1)));
                 println!("Retrying in {:?}...", backoff);
                 sleep(backoff).await;
             }
@@ -152,7 +178,7 @@ impl EnrollmentManager {
 
         Err(format!(
             "Enrollment failed after {} attempts",
-            MAX_RETRY_ATTEMPTS
+            self.config.max_retries
         ))
     }
 
@@ -207,11 +233,14 @@ impl EnrollmentManager {
         self.state = EnrollmentState::Enrolled;
 
         // Store DIF name in RIB
-        let _ = self.rib.create(
-            "/dif/name".to_string(),
-            "dif_info".to_string(),
-            RibValue::String(dif_name.clone()),
-        );
+        let _ = self
+            .rib
+            .create(
+                "/dif/name".to_string(),
+                "dif_info".to_string(),
+                RibValue::String(dif_name.clone()),
+            )
+            .await;
 
         Ok(dif_name)
     }
@@ -219,7 +248,7 @@ impl EnrollmentManager {
     /// Receive enrollment response with polling
     async fn receive_response(&self) -> Result<CdapMessage, String> {
         let poll_interval = Duration::from_millis(100);
-        let max_polls = (ENROLLMENT_TIMEOUT.as_millis() / poll_interval.as_millis()) as u32;
+        let max_polls = (self.config.timeout.as_millis() / poll_interval.as_millis()) as u32;
 
         for _ in 0..max_polls {
             if let Some((pdu, _src_addr)) = self
@@ -283,6 +312,7 @@ impl EnrollmentManager {
         let dif_name_obj = self
             .rib
             .read("/dif/name")
+            .await
             .ok_or("Bootstrap DIF name not set in RIB")?;
         let dif_name = dif_name_obj
             .value

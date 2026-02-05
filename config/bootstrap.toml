@@ -19,3 +19,9 @@ bind_port = 7000
 [enrollment]
 # Bootstrap IPCP doesn't enroll with anyone
 bootstrap_peers = []
+# Enrollment timeout in seconds (conservative for production)
+timeout_secs = 20
+# Maximum retry attempts
+max_retries = 5
+# Initial backoff in milliseconds (exponential backoff: 2s, 4s, 8s, 16s, 32s)
+initial_backoff_ms = 2000

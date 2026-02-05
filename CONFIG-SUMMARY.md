@@ -69,6 +69,30 @@ toml = "0.8"                                        # TOML parsing
 --bootstrap-peers <peers>   # e.g., "127.0.0.1:7000" or "host1:7000,host2:7000"
 ```
 
+### Enrollment Configuration (TOML only)
+
+Both bootstrap and member IPCPs can configure enrollment behavior in their TOML files:
+
+```toml
+[enrollment]
+# Timeout for a single enrollment attempt (seconds)
+timeout_secs = 5             # 5s for local dev, 20-30s for production
+# Maximum number of retry attempts  
+max_retries = 3              # 3 for local dev, 5+ for production
+# Initial backoff in milliseconds (exponential: 1s, 2s, 4s...)
+initial_backoff_ms = 1000    # 1s for local dev, 2s for production
+```
+
+**Default values:**
+- `timeout_secs`: 5 (appropriate for local development)
+- `max_retries`: 3
+- `initial_backoff_ms`: 1000
+
+**Production recommendations:**
+- Same datacenter: 10-15s timeout, 3-5 retries
+- Cross-region: 20-30s timeout, 5 retries, 2000ms backoff
+- High-latency links: 45-60s timeout, 5-7 retries, 3000ms backoff
+
 ### Demo Mode
 ```bash
 # No parameters required

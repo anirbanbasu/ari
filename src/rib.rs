@@ -15,8 +15,9 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::sync::RwLock;
 
 /// Represents an object stored in the RIB with metadata
 #[derive(Debug, Clone)]
@@ -100,14 +101,14 @@ impl Rib {
     /// # Returns
     /// * `Ok(())` if the object was created successfully
     /// * `Err(String)` if an object with that name already exists
-    pub fn create(&self, name: String, class: String, value: RibValue) -> Result<(), String> {
-        let mut objects = self.objects.write().unwrap();
+    pub async fn create(&self, name: String, class: String, value: RibValue) -> Result<(), String> {
+        let mut objects = self.objects.write().await;
 
         if objects.contains_key(&name) {
             return Err(format!("Object '{}' already exists", name));
         }
 
-        let version = self.next_version();
+        let version = self.next_version().await;
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -133,8 +134,8 @@ impl Rib {
     /// # Returns
     /// * `Some(RibObject)` if found
     /// * `None` if not found
-    pub fn read(&self, name: &str) -> Option<RibObject> {
-        let objects = self.objects.read().unwrap();
+    pub async fn read(&self, name: &str) -> Option<RibObject> {
+        let objects = self.objects.read().await;
         objects.get(name).cloned()
     }
 
@@ -147,13 +148,13 @@ impl Rib {
     /// # Returns
     /// * `Ok(())` if updated successfully
     /// * `Err(String)` if the object doesn't exist
-    pub fn update(&self, name: &str, value: RibValue) -> Result<(), String> {
-        let mut objects = self.objects.write().unwrap();
+    pub async fn update(&self, name: &str, value: RibValue) -> Result<(), String> {
+        let mut objects = self.objects.write().await;
 
         match objects.get_mut(name) {
             Some(obj) => {
                 obj.value = value;
-                obj.version = self.next_version();
+                obj.version = self.next_version().await;
                 obj.last_modified = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap()
@@ -172,8 +173,8 @@ impl Rib {
     /// # Returns
     /// * `Ok(())` if deleted successfully
     /// * `Err(String)` if the object doesn't exist
-    pub fn delete(&self, name: &str) -> Result<(), String> {
-        let mut objects = self.objects.write().unwrap();
+    pub async fn delete(&self, name: &str) -> Result<(), String> {
+        let mut objects = self.objects.write().await;
 
         match objects.remove(name) {
             Some(_) => Ok(()),
@@ -188,8 +189,8 @@ impl Rib {
     ///
     /// # Returns
     /// A vector of object names matching the class
-    pub fn list_by_class(&self, class: &str) -> Vec<String> {
-        let objects = self.objects.read().unwrap();
+    pub async fn list_by_class(&self, class: &str) -> Vec<String> {
+        let objects = self.objects.read().await;
         objects
             .values()
             .filter(|obj| obj.class == class)
@@ -198,20 +199,20 @@ impl Rib {
     }
 
     /// Lists all object names in the RIB
-    pub fn list_all(&self) -> Vec<String> {
-        let objects = self.objects.read().unwrap();
+    pub async fn list_all(&self) -> Vec<String> {
+        let objects = self.objects.read().await;
         objects.keys().cloned().collect()
     }
 
     /// Returns the total number of objects in the RIB
-    pub fn count(&self) -> usize {
-        let objects = self.objects.read().unwrap();
+    pub async fn count(&self) -> usize {
+        let objects = self.objects.read().await;
         objects.len()
     }
 
     /// Clears all objects from the RIB
-    pub fn clear(&self) {
-        let mut objects = self.objects.write().unwrap();
+    pub async fn clear(&self) {
+        let mut objects = self.objects.write().await;
         objects.clear();
     }
 
@@ -219,8 +220,8 @@ impl Rib {
     ///
     /// # Returns
     /// A serialized representation of all RIB objects
-    pub fn serialize(&self) -> Vec<u8> {
-        let objects = self.objects.read().unwrap();
+    pub async fn serialize(&self) -> Vec<u8> {
+        let objects = self.objects.read().await;
 
         // Simple serialization: JSON format for human readability
         // In production, you'd use a more efficient binary format
@@ -247,7 +248,7 @@ impl Rib {
     /// # Returns
     /// * `Ok(usize)` with the number of objects synchronized
     /// * `Err(String)` if deserialization fails
-    pub fn deserialize(&self, data: &[u8]) -> Result<usize, String> {
+    pub async fn deserialize(&self, data: &[u8]) -> Result<usize, String> {
         if data.is_empty() {
             return Ok(0);
         }
@@ -261,8 +262,8 @@ impl Rib {
     }
 
     /// Gets all objects from the RIB (for synchronization)
-    pub fn get_all_objects(&self) -> Vec<RibObject> {
-        let objects = self.objects.read().unwrap();
+    pub async fn get_all_objects(&self) -> Vec<RibObject> {
+        let objects = self.objects.read().await;
         objects.values().cloned().collect()
     }
 
@@ -273,8 +274,8 @@ impl Rib {
     ///
     /// # Returns
     /// The number of objects updated or created
-    pub fn merge_objects(&self, objects: Vec<RibObject>) -> usize {
-        let mut local_objects = self.objects.write().unwrap();
+    pub async fn merge_objects(&self, objects: Vec<RibObject>) -> usize {
+        let mut local_objects = self.objects.write().await;
         let mut merged_count = 0;
 
         for obj in objects {
@@ -298,8 +299,8 @@ impl Rib {
     }
 
     /// Generates the next version number
-    fn next_version(&self) -> u64 {
-        let mut counter = self.version_counter.write().unwrap();
+    async fn next_version(&self) -> u64 {
+        let mut counter = self.version_counter.write().await;
         *counter += 1;
         *counter
     }
@@ -349,19 +350,21 @@ impl Default for Rib {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_rib_create_and_read() {
+    #[tokio::test]
+    async fn test_rib_create_and_read() {
         let rib = Rib::new();
 
-        let result = rib.create(
-            "test-object".to_string(),
-            "test-class".to_string(),
-            RibValue::String("test-value".to_string()),
-        );
+        let result = rib
+            .create(
+                "test-object".to_string(),
+                "test-class".to_string(),
+                RibValue::String("test-value".to_string()),
+            )
+            .await;
 
         assert!(result.is_ok());
 
-        let obj = rib.read("test-object");
+        let obj = rib.read("test-object").await;
         assert!(obj.is_some());
 
         let obj = obj.unwrap();
@@ -370,8 +373,8 @@ mod tests {
         assert_eq!(obj.value.as_string(), Some("test-value"));
     }
 
-    #[test]
-    fn test_rib_update() {
+    #[tokio::test]
+    async fn test_rib_update() {
         let rib = Rib::new();
 
         rib.create(
@@ -379,17 +382,18 @@ mod tests {
             "class".to_string(),
             RibValue::Integer(42),
         )
+        .await
         .unwrap();
 
-        let result = rib.update("test", RibValue::Integer(100));
+        let result = rib.update("test", RibValue::Integer(100)).await;
         assert!(result.is_ok());
 
-        let obj = rib.read("test").unwrap();
+        let obj = rib.read("test").await.unwrap();
         assert_eq!(obj.value.as_integer(), Some(100));
     }
 
-    #[test]
-    fn test_rib_delete() {
+    #[tokio::test]
+    async fn test_rib_delete() {
         let rib = Rib::new();
 
         rib.create(
@@ -397,14 +401,15 @@ mod tests {
             "class".to_string(),
             RibValue::Boolean(true),
         )
+        .await
         .unwrap();
 
-        assert!(rib.delete("test").is_ok());
-        assert!(rib.read("test").is_none());
+        assert!(rib.delete("test").await.is_ok());
+        assert!(rib.read("test").await.is_none());
     }
 
-    #[test]
-    fn test_rib_list_by_class() {
+    #[tokio::test]
+    async fn test_rib_list_by_class() {
         let rib = Rib::new();
 
         rib.create(
@@ -412,33 +417,39 @@ mod tests {
             "type-a".to_string(),
             RibValue::Integer(1),
         )
+        .await
         .unwrap();
         rib.create(
             "obj2".to_string(),
             "type-b".to_string(),
             RibValue::Integer(2),
         )
+        .await
         .unwrap();
         rib.create(
             "obj3".to_string(),
             "type-a".to_string(),
             RibValue::Integer(3),
         )
+        .await
         .unwrap();
 
-        let type_a_objects = rib.list_by_class("type-a");
+        let type_a_objects = rib.list_by_class("type-a").await;
         assert_eq!(type_a_objects.len(), 2);
         assert!(type_a_objects.contains(&"obj1".to_string()));
         assert!(type_a_objects.contains(&"obj3".to_string()));
     }
 
-    #[test]
-    fn test_rib_duplicate_create() {
+    #[tokio::test]
+    async fn test_rib_duplicate_create() {
         let rib = Rib::new();
 
         rib.create("dup".to_string(), "class".to_string(), RibValue::Integer(1))
+            .await
             .unwrap();
-        let result = rib.create("dup".to_string(), "class".to_string(), RibValue::Integer(2));
+        let result = rib
+            .create("dup".to_string(), "class".to_string(), RibValue::Integer(2))
+            .await;
 
         assert!(result.is_err());
     }

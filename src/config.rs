@@ -143,10 +143,42 @@ pub struct ShimConfig {
 }
 
 /// Enrollment section of config
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EnrollmentConfig {
     #[serde(default)]
     pub bootstrap_peers: Vec<BootstrapPeer>,
+    /// Timeout for a single enrollment attempt (seconds)
+    #[serde(default = "default_enrollment_timeout")]
+    pub timeout_secs: u64,
+    /// Maximum number of retry attempts
+    #[serde(default = "default_max_retries")]
+    pub max_retries: u32,
+    /// Initial backoff duration in milliseconds (doubles on each retry)
+    #[serde(default = "default_initial_backoff_ms")]
+    pub initial_backoff_ms: u64,
+}
+
+fn default_enrollment_timeout() -> u64 {
+    5
+}
+
+fn default_max_retries() -> u32 {
+    3
+}
+
+fn default_initial_backoff_ms() -> u64 {
+    1000
+}
+
+impl Default for EnrollmentConfig {
+    fn default() -> Self {
+        Self {
+            bootstrap_peers: Vec::new(),
+            timeout_secs: default_enrollment_timeout(),
+            max_retries: default_max_retries(),
+            initial_backoff_ms: default_initial_backoff_ms(),
+        }
+    }
 }
 
 /// Unified configuration after parsing CLI or file
@@ -160,6 +192,9 @@ pub struct IpcpConfiguration {
     pub bootstrap_peers: Vec<String>,
     pub address_pool_start: u64,
     pub address_pool_end: u64,
+    pub enrollment_timeout_secs: u64,
+    pub enrollment_max_retries: u32,
+    pub enrollment_initial_backoff_ms: u64,
 }
 
 impl IpcpConfiguration {
@@ -186,6 +221,9 @@ impl IpcpConfiguration {
                     bootstrap_peers: vec![],
                     address_pool_start: 1002,
                     address_pool_end: 1999,
+                    enrollment_timeout_secs: default_enrollment_timeout(),
+                    enrollment_max_retries: default_max_retries(),
+                    enrollment_initial_backoff_ms: default_initial_backoff_ms(),
                 })
             }
             IpcpMode::Bootstrap => {
@@ -207,6 +245,9 @@ impl IpcpConfiguration {
                     bootstrap_peers: vec![],
                     address_pool_start: args.address_pool_start,
                     address_pool_end: args.address_pool_end,
+                    enrollment_timeout_secs: default_enrollment_timeout(),
+                    enrollment_max_retries: default_max_retries(),
+                    enrollment_initial_backoff_ms: default_initial_backoff_ms(),
                 })
             }
             IpcpMode::Member => {
@@ -228,6 +269,9 @@ impl IpcpConfiguration {
                     bootstrap_peers: peers,
                     address_pool_start: args.address_pool_start,
                     address_pool_end: args.address_pool_end,
+                    enrollment_timeout_secs: default_enrollment_timeout(),
+                    enrollment_max_retries: default_max_retries(),
+                    enrollment_initial_backoff_ms: default_initial_backoff_ms(),
                 })
             }
         }
@@ -259,6 +303,9 @@ impl IpcpConfiguration {
             bootstrap_peers,
             address_pool_start: config.dif.address_pool_start.unwrap_or(1002),
             address_pool_end: config.dif.address_pool_end.unwrap_or(1999),
+            enrollment_timeout_secs: config.enrollment.timeout_secs,
+            enrollment_max_retries: config.enrollment.max_retries,
+            enrollment_initial_backoff_ms: config.enrollment.initial_backoff_ms,
         })
     }
 

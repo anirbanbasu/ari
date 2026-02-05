@@ -19,3 +19,9 @@ bind_port = 7001
 bootstrap_peers = [
     { address = "127.0.0.1:7000", rina_addr = 1001 }
 ]
+# Enrollment timeout in seconds (optimized for local development)
+timeout_secs = 5
+# Maximum retry attempts
+max_retries = 3
+# Initial backoff in milliseconds (exponential backoff: 1s, 2s, 4s)
+initial_backoff_ms = 1000
