@@ -242,7 +242,57 @@ impl EnrollmentManager {
             )
             .await;
 
+        // Request routing table from bootstrap
+        println!("Requesting routing table from bootstrap...");
+        let _ = self.sync_routes_from_bootstrap(bootstrap_addr).await;
+
         Ok(dif_name)
+    }
+
+    /// Synchronize routing table from bootstrap's RIB
+    async fn sync_routes_from_bootstrap(&self, bootstrap_addr: u64) -> Result<(), String> {
+        // Request all static routes from bootstrap
+        let cdap_msg = CdapMessage {
+            op_code: CdapOpCode::Read,
+            obj_name: "/routing/static/*".to_string(),
+            obj_class: Some("static_route".to_string()),
+            obj_value: None,
+            invoke_id: 2,
+            result: 0,
+            result_reason: None,
+        };
+
+        let cdap_bytes = bincode::serialize(&cdap_msg)
+            .map_err(|e| format!("Failed to serialize CDAP message: {}", e))?;
+
+        let pdu = Pdu::new_data(0, bootstrap_addr, 0, 0, 0, cdap_bytes);
+
+        self.shim
+            .send_pdu(&pdu)
+            .map_err(|e| format!("Failed to send route request: {}", e))?;
+
+        // Wait for routing table response
+        match self.receive_response().await {
+            Ok(response) => {
+                if let Some(RibValue::Struct(routes)) = response.obj_value {
+                    println!("Received {} routes from bootstrap", routes.len());
+
+                    // Store routes in local RIB
+                    for (dest, route_info) in routes {
+                        let route_name = format!("/routing/static/{}", dest);
+                        let _ = self
+                            .rib
+                            .create(route_name, "static_route".to_string(), *route_info)
+                            .await;
+                    }
+                }
+                Ok(())
+            }
+            Err(e) => {
+                println!("Warning: Failed to sync routes: {}", e);
+                Ok(()) // Non-fatal - continue enrollment
+            }
+        }
     }
 
     /// Receive enrollment response with polling

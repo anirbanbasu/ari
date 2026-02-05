@@ -501,6 +501,34 @@ async fn run_bootstrap_mode(config: IpcpConfiguration) {
     .await
     .unwrap();
 
+    // Load static routes into RIB
+    println!("\n✓ Loading static routes into RIB...");
+    for route in &config.static_routes {
+        let route_name = format!("/routing/static/{}", route.destination);
+        let route_value = ari::rib::RibValue::Struct({
+            let mut map = std::collections::HashMap::new();
+            map.insert(
+                "next_hop_address".to_string(),
+                Box::new(ari::rib::RibValue::String(route.next_hop_address.clone())),
+            );
+            map.insert(
+                "next_hop_rina_addr".to_string(),
+                Box::new(ari::rib::RibValue::Integer(route.next_hop_rina_addr as i64)),
+            );
+            map
+        });
+
+        rib.create(route_name.clone(), "static_route".to_string(), route_value)
+            .await
+            .unwrap();
+
+        println!(
+            "  Route: {} → {} ({})",
+            route.destination, route.next_hop_address, route.next_hop_rina_addr
+        );
+    }
+    println!("  Loaded {} static routes", config.static_routes.len());
+
     let shim = Arc::new(UdpShim::new(local_addr));
 
     // Bind shim to UDP socket

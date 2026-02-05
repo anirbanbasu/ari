@@ -103,6 +103,17 @@ pub struct BootstrapPeer {
     pub rina_addr: Option<u64>,
 }
 
+/// Static route configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StaticRoute {
+    /// Destination RINA address
+    pub destination: u64,
+    /// Next hop network address (host:port)
+    pub next_hop_address: String,
+    /// Next hop RINA address
+    pub next_hop_rina_addr: u64,
+}
+
 /// TOML configuration file structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TomlConfig {
@@ -111,6 +122,8 @@ pub struct TomlConfig {
     pub shim: ShimConfig,
     #[serde(default)]
     pub enrollment: EnrollmentConfig,
+    #[serde(default)]
+    pub routing: RoutingConfig,
 }
 
 /// IPCP section of config
@@ -181,6 +194,14 @@ impl Default for EnrollmentConfig {
     }
 }
 
+/// Routing section of config
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct RoutingConfig {
+    /// Static routes (bootstrap only)
+    #[serde(default)]
+    pub static_routes: Vec<StaticRoute>,
+}
+
 /// Unified configuration after parsing CLI or file
 #[derive(Debug, Clone)]
 pub struct IpcpConfiguration {
@@ -195,6 +216,7 @@ pub struct IpcpConfiguration {
     pub enrollment_timeout_secs: u64,
     pub enrollment_max_retries: u32,
     pub enrollment_initial_backoff_ms: u64,
+    pub static_routes: Vec<StaticRoute>,
 }
 
 impl IpcpConfiguration {
@@ -224,6 +246,7 @@ impl IpcpConfiguration {
                     enrollment_timeout_secs: default_enrollment_timeout(),
                     enrollment_max_retries: default_max_retries(),
                     enrollment_initial_backoff_ms: default_initial_backoff_ms(),
+                    static_routes: vec![],
                 })
             }
             IpcpMode::Bootstrap => {
@@ -248,6 +271,7 @@ impl IpcpConfiguration {
                     enrollment_timeout_secs: default_enrollment_timeout(),
                     enrollment_max_retries: default_max_retries(),
                     enrollment_initial_backoff_ms: default_initial_backoff_ms(),
+                    static_routes: vec![], // No CLI support for routes yet
                 })
             }
             IpcpMode::Member => {
@@ -272,6 +296,7 @@ impl IpcpConfiguration {
                     enrollment_timeout_secs: default_enrollment_timeout(),
                     enrollment_max_retries: default_max_retries(),
                     enrollment_initial_backoff_ms: default_initial_backoff_ms(),
+                    static_routes: vec![], // Members learn routes from bootstrap
                 })
             }
         }
@@ -306,6 +331,7 @@ impl IpcpConfiguration {
             enrollment_timeout_secs: config.enrollment.timeout_secs,
             enrollment_max_retries: config.enrollment.max_retries,
             enrollment_initial_backoff_ms: config.enrollment.initial_backoff_ms,
+            static_routes: config.routing.static_routes,
         })
     }
 

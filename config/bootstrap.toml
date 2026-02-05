@@ -25,3 +25,12 @@ timeout_secs = 20
 max_retries = 5
 # Initial backoff in milliseconds (exponential backoff: 2s, 4s, 8s, 16s, 32s)
 initial_backoff_ms = 2000
+
+[routing]
+# Static routes - Bootstrap knows how to reach member IPCPs
+static_routes = [
+    # Route to member IPCP #1
+    { destination = 1002, next_hop_address = "127.0.0.1:7001", next_hop_rina_addr = 1002 },
+    # Add more routes as members join
+    # { destination = 1003, next_hop_address = "127.0.0.1:7002", next_hop_rina_addr = 1003 },
+]

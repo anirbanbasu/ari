@@ -327,9 +327,12 @@ impl ShimActor {
         }
     }
 
-    /// Spawns a receiver task that continuously receives packets
+    /// Spawns a receiver task that continuously receives packets and processes them through RMT
     pub async fn spawn_receiver(
         shim: Arc<RwLock<UdpShim>>,
+        rmt_handle: RmtHandle,
+        efcp_handle: EfcpHandle,
+        local_rina_addr: u64,
         mut receiver_shutdown: mpsc::Receiver<()>,
     ) {
         tokio::spawn(async move {
@@ -340,9 +343,44 @@ impl ShimActor {
                     }
                     _ = tokio::time::sleep(tokio::time::Duration::from_millis(10)) => {
                         let shim = shim.read().await;
-                        if let Ok(Some((data, src))) = shim.recv_from() {
-                            println!("Received {} bytes from {}", data.len(), src);
-                            // TODO: Pass to RMT for processing
+                        if let Ok(Some((pdu_bytes, src))) = shim.recv_from() {
+                            // Deserialize PDU
+                            match bincode::deserialize::<Pdu>(&pdu_bytes) {
+                                Ok(pdu) => {
+                                    println!("📥 Received PDU from {} → dst:{} ({}bytes)",
+                                        src, pdu.dst_addr, pdu_bytes.len());
+
+                                    // Send to RMT for processing
+                                    let (resp_tx, mut resp_rx) = mpsc::channel(1);
+                                    let _ = rmt_handle.send(RmtMessage::ProcessIncoming {
+                                        pdu: pdu.clone(),
+                                        response: resp_tx,
+                                    }).await;
+
+                                    // Check if PDU is for local delivery
+                                    if let Some(Ok(Some(local_addr))) = resp_rx.recv().await {
+                                        if local_addr == local_rina_addr {
+                                            println!("  ✓ PDU is for local delivery, passing to EFCP");
+
+                                            // Deliver to EFCP
+                                            let (efcp_tx, mut efcp_rx) = mpsc::channel(1);
+                                            let _ = efcp_handle.send(EfcpMessage::ReceivePdu {
+                                                pdu,
+                                                response: efcp_tx,
+                                            }).await;
+
+                                            if let Some(Ok(Some(data))) = efcp_rx.recv().await {
+                                                println!("  ✓ EFCP delivered {} bytes of data", data.len());
+                                            }
+                                        } else {
+                                            println!("  → PDU queued for forwarding to {}", local_addr);
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!("Failed to deserialize PDU: {}", e);
+                                }
+                            }
                         }
                     }
                 }
