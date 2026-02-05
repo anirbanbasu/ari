@@ -156,7 +156,7 @@ impl Flow {
     }
 
     fn handle_management_pdu(&mut self, _pdu: Pdu) -> Result<Option<Vec<u8>>, String> {
-        // Management PDUs should be handled by enrolment/cdap layers
+        // Management PDUs should be handled by enrollment/cdap layers
         Ok(None)
     }
 

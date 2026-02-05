@@ -30,7 +30,7 @@ The current documentation is scattered and will be consolidated over time. For n
 - **[RUNNING.md](RUNNING.md)** - Quick start and operational guide
 - **[CONFIG-EXAMPLES.md](CONFIG-EXAMPLES.md)** - Comprehensive configuration examples
 - **[CONFIG-SUMMARY.md](CONFIG-SUMMARY.md)** - Implementation details
-- **[ENROLMENT-PHASES.md](ENROLMENT-PHASES.md)** - Enrolment implementation guide
+- **[ENROLLMENT-PHASES.md](ENROLLMENT-PHASES.md)** - Enrollment implementation guide
 
 ## Features
 
@@ -42,40 +42,40 @@ The current documentation is scattered and will be consolidated over time. For n
 - ✅ UDP/IP Shim Layer
 - ✅ Directory Service
 - ✅ Flow Allocator
-- ✅ Enrolment Manager
+- ✅ Enrollment Manager
 - ✅ Pluggable Policies (Routing, QoS, Scheduling)
 - ✅ Actor-based concurrent components
 - ✅ Multi-IPCP configuration system
 
 ### In Progress
-- ⚠️ Full enrolment protocol implementation
+- ⚠️ Full enrollment protocol implementation
 - ⚠️ CDAP synchronization over network
 - ⚠️ Inter-IPCP flow allocation
 
-### Enrolment Implementation
+### Enrollment Implementation
 
-The enrolment protocol is **fully implemented** ✅ with async network communication, enabling member IPCPs to join a DIF:
+The enrollment protocol is **fully implemented** ✅ with async network communication, enabling member IPCPs to join a DIF:
 
 #### Core Features (Implemented)
-- **Fully Async**: tokio-based async/await throughout the enrolment flow
+- **Fully Async**: tokio-based async/await throughout the enrollment flow
 - **Timeout & Retry**: 30-second timeout per attempt, 3 retry attempts with exponential backoff (1s, 2s, 4s)
 - **Binary Protocol**: Efficient bincode serialization for CDAP messages over PDUs
 - **Address Mapping**: Dynamic RINA ↔ socket address translation with auto-registration
 - **Bidirectional**: Handles both member-initiated requests and bootstrap responses
 - **Error Resilient**: Comprehensive error handling for network, serialization, and timeout errors
 
-#### Enrolment Flow
-1. **Member IPCP**: Initiates enrolment by sending CDAP CREATE message via UDP PDU
+#### Enrollment Flow
+1. **Member IPCP**: Initiates enrollment by sending CDAP CREATE message via UDP PDU
 2. **Bootstrap IPCP**: Receives request, validates, and responds with DIF name
 3. **Member IPCP**: Receives response, updates state to Enrolled, stores DIF name in RIB
-4. **Retry Logic**: Automatically retries with backoff if enrolment fails
+4. **Retry Logic**: Automatically retries with backoff if enrollment fails
 
 #### Future Enhancements (Not Yet Implemented)
 - **Address Assignment**: Bootstrap assigns dynamic addresses from pool
 - **RIB Synchronization**: Full RIB snapshot transfer and incremental updates
 - **Multi-peer Bootstrap**: Peer selection, failover, and dynamic discovery
 - **Security**: Authentication, encryption, and certificate validation
-- **Re-enrolment**: Automatic re-enrolment after network failures
+- **Re-enrollment**: Automatic re-enrollment after network failures
 
 ## License
 

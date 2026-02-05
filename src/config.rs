@@ -80,7 +80,7 @@ pub struct CliArgs {
     #[arg(long, value_name = "ADDR:PORT")]
     pub bind: Option<String>,
 
-    /// Bootstrap peer addresses for enrolment (member mode only)
+    /// Bootstrap peer addresses for enrollment (member mode only)
     /// Format: "host:port" or "host:port,host:port"
     #[arg(long, value_name = "PEERS", value_delimiter = ',')]
     pub bootstrap_peers: Option<Vec<String>>,
@@ -110,7 +110,7 @@ pub struct TomlConfig {
     pub dif: DifConfig,
     pub shim: ShimConfig,
     #[serde(default)]
-    pub enrolment: EnrolmentConfig,
+    pub enrollment: EnrollmentConfig,
 }
 
 /// IPCP section of config
@@ -142,9 +142,9 @@ pub struct ShimConfig {
     pub bind_port: u16,
 }
 
-/// Enrolment section of config
+/// Enrollment section of config
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct EnrolmentConfig {
+pub struct EnrollmentConfig {
     #[serde(default)]
     pub bootstrap_peers: Vec<BootstrapPeer>,
 }
@@ -223,7 +223,7 @@ impl IpcpConfiguration {
                     name,
                     mode: IpcpMode::Member,
                     dif_name,
-                    address: None, // Will be assigned during enrolment
+                    address: None, // Will be assigned during enrollment
                     bind_address: bind,
                     bootstrap_peers: peers,
                     address_pool_start: args.address_pool_start,
@@ -244,7 +244,7 @@ impl IpcpConfiguration {
         let bind_address = format!("{}:{}", config.shim.bind_address, config.shim.bind_port);
 
         let bootstrap_peers = config
-            .enrolment
+            .enrollment
             .bootstrap_peers
             .iter()
             .map(|peer| peer.address.clone())

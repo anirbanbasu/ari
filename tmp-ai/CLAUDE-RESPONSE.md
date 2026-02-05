@@ -14,7 +14,7 @@ Based on the "instructions about an assessment of the implementation and the doc
 
 1. **The configuration system remains excellent** - The dual CLI/TOML approach with clear mode separation continues to be a standout feature.
 
-2. **Documentation quality** - The transparency in the README about what's implemented vs. what's pending is exemplary. The new "Enrolment Implementation" section is particularly well-done.
+2. **Documentation quality** - The transparency in the README about what's implemented vs. what's pending is exemplary. The new "Enrollment Implementation" section is particularly well-done.
 
 3. **Solid architectural foundation** - The actor-based model, component separation, and use of Rust's features (Arc/RwLock, strong typing) are all appropriate choices.
 
@@ -28,7 +28,7 @@ The implementation has made a **major leap forward**. You now have:
 
 ✅ **Working network communication** - The UDP shim actually sends and receives PDUs  
 ✅ **Real enrollment protocol** - Fully async with timeout/retry, using bincode  
-✅ **State machine implementation** - EnrolmentState transitions work correctly  
+✅ **State machine implementation** - EnrollmentState transitions work correctly  
 ✅ **Bidirectional CDAP** - Both request and response handling over the network
 
 This is no longer a collection of isolated components. The system can now perform a basic distributed operation. That's huge.

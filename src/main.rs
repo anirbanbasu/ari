@@ -2,7 +2,7 @@
 // Copyright © 2026-present ARI Contributors
 
 use ari::{
-    Dif, Directory, EfcpActor, EfcpHandle, EfcpMessage, EnrolmentManager, FlowAllocator,
+    Dif, Directory, EfcpActor, EfcpHandle, EfcpMessage, EnrollmentManager, FlowAllocator,
     FlowConfig, ForwardingEntry, IpcProcess, IpcpState, PriorityScheduling, Rib, RibActor,
     RibHandle, RibMessage, RibValue, RmtActor, RmtHandle, RmtMessage, RoutingPolicy, ShimActor,
     ShimHandle, ShimMessage, ShortestPathRouting, UdpShim,
@@ -128,7 +128,7 @@ async fn run_demo_mode() {
         ipcp.address.unwrap(),
         ipcp.dif_name
     );
-    println!("  Components: RIB, CDAP, EFCP, RMT, Shim, FAL, Directory, Enrolment\n");
+    println!("  Components: RIB, CDAP, EFCP, RMT, Shim, FAL, Directory, Enrollment\n");
 
     // === RIB Operations (Actor-based) ===
     println!("=== 1. Resource Information Base (RIB Actor) ===");
@@ -347,14 +347,14 @@ async fn run_demo_mode() {
     println!("  Flow allocated with ID: {:?}", response.flow_id);
     println!("  Active flows: {}\n", fal.flow_count());
 
-    // === Enrolment Manager ===
-    println!("=== 8. Enrolment Manager ===");
+    // === Enrollment Manager ===
+    println!("=== 8. Enrollment Manager ===");
     let rib = ari::Rib::new();
     let shim_for_em = Arc::new(ari::UdpShim::new(local_addr));
-    let mut em = EnrolmentManager::new(rib, shim_for_em);
+    let mut em = EnrollmentManager::new(rib, shim_for_em);
     em.set_ipcp_name("ipcp-1".to_string());
-    println!("  Initiated enrolment for ipcp-1");
-    println!("  Enrolment state: {:?}\n", em.state());
+    println!("  Initiated enrollment for ipcp-1");
+    println!("  Enrollment state: {:?}\n", em.state());
 
     // === Pluggable Policies ===
     println!("=== 9. Pluggable Policies ===");
@@ -403,7 +403,7 @@ async fn run_demo_mode() {
     println!("✓ PDU: Consolidated definitions with QoS support");
     println!("✓ Directory: Name resolution and registration service");
     println!("✓ FAL: Flow allocation protocol");
-    println!("✓ Enrolment: IPCP enrolment manager");
+    println!("✓ Enrollment: IPCP enrollment manager");
     println!("✓ Policies: Pluggable routing, scheduling, and QoS");
     println!("✓ RIB Actor: Managing distributed state");
     println!("✓ EFCP Actor: Managing flows concurrently");
@@ -490,8 +490,8 @@ async fn run_bootstrap_mode(config: IpcpConfiguration) {
         config.address_pool_start, config.address_pool_end
     );
 
-    // Set up async enrolment manager
-    println!("\n✓ Setting up enrolment manager...");
+    // Set up async enrollment manager
+    println!("\n✓ Setting up enrollment manager...");
     let rib = Rib::new();
     rib.create(
         "/dif/name".to_string(),
@@ -509,13 +509,13 @@ async fn run_bootstrap_mode(config: IpcpConfiguration) {
     }
     println!("  Bound to: {}", config.bind_address);
 
-    let enrolment_mgr = EnrolmentManager::new(rib, shim.clone());
-    println!("  Enrolment manager ready");
+    let enrollment_mgr = EnrollmentManager::new(rib, shim.clone());
+    println!("  Enrollment manager ready");
 
     println!("\n🎉 Bootstrap IPCP operational!");
-    println!("   Waiting for enrolment requests from member IPCPs...\n");
+    println!("   Waiting for enrollment requests from member IPCPs...\n");
 
-    // Listen for incoming enrolment requests
+    // Listen for incoming enrollment requests
     loop {
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
@@ -524,8 +524,11 @@ async fn run_bootstrap_mode(config: IpcpConfiguration) {
                 "  Received PDU from address {} ({})",
                 pdu.src_addr, src_addr
             );
-            if let Err(e) = enrolment_mgr.handle_enrolment_request(&pdu, src_addr).await {
-                eprintln!("  Failed to handle enrolment request: {}", e);
+            if let Err(e) = enrollment_mgr
+                .handle_enrollment_request(&pdu, src_addr)
+                .await
+            {
+                eprintln!("  Failed to handle enrollment request: {}", e);
             }
         }
     }
@@ -535,8 +538,8 @@ async fn run_bootstrap_mode(config: IpcpConfiguration) {
 async fn run_member_mode(config: IpcpConfiguration) {
     println!("=== RINA Member IPCP ===\n");
 
-    // Member starts without a RINA address (will get one during enrolment)
-    let local_addr = 0; // Placeholder until enrolment
+    // Member starts without a RINA address (will get one during enrollment)
+    let local_addr = 0; // Placeholder until enrollment
 
     // Spawn actor tasks
     println!("✓ Spawning RINA component actors...\n");
@@ -559,7 +562,7 @@ async fn run_member_mode(config: IpcpConfiguration) {
     });
     println!("  → EFCP Actor spawned");
 
-    // RMT Actor (will be updated with real address after enrolment)
+    // RMT Actor (will be updated with real address after enrollment)
     let (rmt_tx, rmt_rx) = mpsc::channel(32);
     let _rmt_handle = RmtHandle::new(rmt_tx);
     tokio::spawn(async move {
@@ -586,8 +589,8 @@ async fn run_member_mode(config: IpcpConfiguration) {
     println!("  DIF: {}", config.dif_name);
     println!("  Status: Enrolling (address pending)");
 
-    // Set up async enrolment manager
-    println!("\n✓ Setting up enrolment manager...");
+    // Set up async enrollment manager
+    println!("\n✓ Setting up enrollment manager...");
     let rib = Rib::new();
     let shim = Arc::new(UdpShim::new(local_addr));
 
@@ -598,12 +601,12 @@ async fn run_member_mode(config: IpcpConfiguration) {
     }
     println!("  Bound to: {}", config.bind_address);
 
-    let mut enrolment_mgr = EnrolmentManager::new(rib, shim.clone());
-    enrolment_mgr.set_ipcp_name(config.name.clone());
-    println!("  Enrolment manager ready");
+    let mut enrollment_mgr = EnrollmentManager::new(rib, shim.clone());
+    enrollment_mgr.set_ipcp_name(config.name.clone());
+    println!("  Enrollment manager ready");
 
-    // Attempt enrolment with bootstrap peers
-    println!("\n✓ Initiating enrolment with bootstrap IPCP...");
+    // Attempt enrollment with bootstrap peers
+    println!("\n✓ Initiating enrollment with bootstrap IPCP...");
     println!("  Bootstrap peers: {:?}", config.bootstrap_peers);
 
     // Parse bootstrap peer address and map to RINA address
@@ -622,8 +625,8 @@ async fn run_member_mode(config: IpcpConfiguration) {
         bootstrap_rina_addr, bootstrap_peer
     );
 
-    println!("\n  Attempting enrolment...");
-    match enrolment_mgr
+    println!("\n  Attempting enrollment...");
+    match enrollment_mgr
         .enrol_with_bootstrap(bootstrap_rina_addr)
         .await
     {
@@ -639,8 +642,8 @@ async fn run_member_mode(config: IpcpConfiguration) {
             }
         }
         Err(e) => {
-            eprintln!("\n❌ Enrolment failed: {}", e);
-            ipcp.set_state(IpcpState::Error("Enrolment failed".to_string()));
+            eprintln!("\n❌ Enrollment failed: {}", e);
+            ipcp.set_state(IpcpState::Error("Enrollment failed".to_string()));
             std::process::exit(1);
         }
     }

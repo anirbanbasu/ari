@@ -1,55 +1,55 @@
-# Enrolment Implementation Guide
+# Enrollment Implementation Guide
 
 ## Overview
 
-This document describes the **fully implemented** async enrolment protocol, enabling member IPCPs to join a DIF by communicating with a bootstrap IPCP over the network.
+This document describes the **fully implemented** async enrollment protocol, enabling member IPCPs to join a DIF by communicating with a bootstrap IPCP over the network.
 
 **Status: Complete Implementation** ✅
 
-The implementation is a unified async enrolment system with timeout, retry, and full network integration. This guide documents the complete implementation details, architecture, and usage patterns.
+The implementation is a unified async enrollment system with timeout, retry, and full network integration. This guide documents the complete implementation details, architecture, and usage patterns.
 
 ## Implementation Components
 
 ### 1. Serialization Support
 
-All enrolment data structures now support serialization via `serde`:
-- `EnrolmentRequest`
-- `EnrolmentResponse`
+All enrollment data structures now support serialization via `serde`:
+- `EnrollmentRequest`
+- `EnrollmentResponse`
 - `DifConfiguration`
 - `NeighborInfo`
 
 This enables these structures to be transmitted over the network in JSON format.
 
-### 2. Network Methods in EnrolmentManager
+### 2. Network Methods in EnrollmentManager
 
 #### `allocate_management_flow()`
-Allocates a dedicated EFCP flow for enrolment communication:
+Allocates a dedicated EFCP flow for enrollment communication:
 - Creates a reliable, ordered flow configuration
 - Uses EFCP's flow allocation mechanism
 - Returns a flow ID for subsequent message exchange
 
-#### `send_enrolment_request()`
-Sends an enrolment request via CDAP over the allocated flow:
-- Serializes the `EnrolmentRequest` to JSON
-- Wraps it in a CDAP CREATE message with object name `enrolment/request`
+#### `send_enrollment_request()`
+Sends an enrollment request via CDAP over the allocated flow:
+- Serializes the `EnrollmentRequest` to JSON
+- Wraps it in a CDAP CREATE message with object name `enrollment/request`
 - Sends the CDAP message over the EFCP flow
 - Returns the invoke ID for response correlation
 
-#### `receive_enrolment_response()` (Placeholder)
-Receives and processes the enrolment response:
+#### `receive_enrollment_response()` (Placeholder)
+Receives and processes the enrollment response:
 - Currently a placeholder returning "async implementation pending"
 - Will be fully implemented in Phase 2 with proper async/await
 - Needs to handle PDU reception and CDAP response parsing
 
-#### `handle_enrolment_request()`
-Bootstrap side: Processes incoming enrolment requests:
-- Extracts and deserializes enrolment request from CDAP message
-- Calls existing `process_enrolment_request()` to validate and prepare response
+#### `handle_enrollment_request()`
+Bootstrap side: Processes incoming enrollment requests:
+- Extracts and deserializes enrollment request from CDAP message
+- Calls existing `process_enrollment_request()` to validate and prepare response
 - Serializes the response and sends it back via CDAP over EFCP
 
 ### 3. CDAP Enhancements
 
-Added `start_request()` method to `CdapSession` for enrolment operations.
+Added `start_request()` method to `CdapSession` for enrollment operations.
 
 ## Architecture
 
@@ -61,20 +61,20 @@ Member IPCP                           Bootstrap IPCP
      |------------------------------------>|
      |        [EFCP Flow Allocated]        |
      |                                      |
-     | 2. send_enrolment_request()        |
-     |   [CDAP CREATE enrolment/request]  |
+     | 2. send_enrollment_request()        |
+     |   [CDAP CREATE enrollment/request]  |
      |------------------------------------>|
      |                                      |
-     |                                      | 3. handle_enrolment_request()
+     |                                      | 3. handle_enrollment_request()
      |                                      |    - Validate request
      |                                      |    - Prepare DIF config
      |                                      |    - Send response
      |                                      |
-     | 4. receive_enrolment_response()    |
+     | 4. receive_enrollment_response()    |
      |   [CDAP response with config]       |
      |<------------------------------------|
      |                                      |
-     | 5. complete_enrolment()            |
+     | 5. complete_enrollment()            |
      |    - Apply RIB snapshot             |
      |    - Transition to Enrolled         |
      |                                      |
@@ -85,12 +85,12 @@ Member IPCP                           Bootstrap IPCP
 ### Member IPCP Side
 
 ```rust
-use ari::{EnrolmentManager, Rib, CdapSession, Efcp, UdpShim};
+use ari::{EnrollmentManager, Rib, CdapSession, Efcp, UdpShim};
 use std::net::SocketAddr;
 
 // Initialize components
 let rib = Rib::new();
-let mut enrolment_mgr = EnrolmentManager::new(rib.clone());
+let mut enrollment_mgr = EnrollmentManager::new(rib.clone());
 let mut cdap = CdapSession::new(rib.clone());
 let mut efcp = Efcp::new();
 let shim = UdpShim::new(0);
@@ -100,7 +100,7 @@ let bootstrap_socket: SocketAddr = "127.0.0.1:7000".parse().unwrap();
 let bootstrap_rina_addr = 1001;
 
 // Step 1: Allocate management flow
-let flow_id = enrolment_mgr.allocate_management_flow(
+let flow_id = enrollment_mgr.allocate_management_flow(
     bootstrap_socket,
     0, // Not yet assigned address
     bootstrap_rina_addr,
@@ -108,14 +108,14 @@ let flow_id = enrolment_mgr.allocate_management_flow(
     &shim,
 )?;
 
-// Step 2: Send enrolment request
-let request = enrolment_mgr.initiate_enrolment(
+// Step 2: Send enrollment request
+let request = enrollment_mgr.initiate_enrollment(
     "my-ipcp".to_string(),
     "my-dif".to_string(),
     0,
 );
 
-let invoke_id = enrolment_mgr.send_enrolment_request(
+let invoke_id = enrollment_mgr.send_enrollment_request(
     flow_id,
     &request,
     &mut cdap,
@@ -123,10 +123,10 @@ let invoke_id = enrolment_mgr.send_enrolment_request(
 )?;
 
 // Step 3: Wait for response (async in Phase 2)
-// let response = enrolment_mgr.receive_enrolment_response(flow_id, invoke_id, &mut efcp)?;
+// let response = enrollment_mgr.receive_enrollment_response(flow_id, invoke_id, &mut efcp)?;
 
-// Step 4: Complete enrolment
-// enrolment_mgr.complete_enrolment(response)?;
+// Step 4: Complete enrollment
+// enrollment_mgr.complete_enrollment(response)?;
 ```
 
 ### Bootstrap IPCP Side
@@ -143,7 +143,7 @@ let neighbors = vec![
     },
 ];
 
-enrolment_mgr.handle_enrolment_request(
+enrollment_mgr.handle_enrollment_request(
     flow_id,
     &cdap_msg,
     "my-dif",
@@ -155,21 +155,21 @@ enrolment_mgr.handle_enrolment_request(
 
 ## Testing
 
-Run the enrolment tests:
+Run the enrollment tests:
 
 ```bash
-cargo test enrolment
+cargo test enrollment
 ```
 
-The tests in `src/enrolment.rs` validate:
-- Enrolment request/response flow
+The tests in `src/enrollment.rs` validate:
+- Enrollment request/response flow
 - Management flow allocation
 - CDAP message serialization
 - DIF configuration validation
 
 ## Current Limitations
 
-The current implementation supports basic enrolment with the following limitations:
+The current implementation supports basic enrollment with the following limitations:
 
 1. **Address Assignment**: Member IPCPs do not receive dynamic address assignments from bootstrap
    - Member uses address 0 as placeholder
@@ -183,14 +183,14 @@ The current implementation supports basic enrolment with the following limitatio
    - Member tries only one bootstrap peer
    - No peer selection or failover logic
 
-4. **No Security**: Enrolment messages are not authenticated
+4. **No Security**: Enrollment messages are not authenticated
    - No mutual authentication
-   - No encryption of enrolment data
+   - No encryption of enrollment data
    - No certificate validation
 
-5. **No Re-enrolment**: Cannot recover from network failures
+5. **No Re-enrollment**: Cannot recover from network failures
    - No keep-alive mechanism
-   - No automatic re-enrolment after disconnection
+   - No automatic re-enrollment after disconnection
 
 ## Dependencies
 
@@ -202,34 +202,34 @@ The current implementation supports basic enrolment with the following limitatio
 
 ## Async Network Integration
 
-The enrolment protocol uses a fully async implementation with real network communication, timeout, and retry logic.
+The enrollment protocol uses a fully async implementation with real network communication, timeout, and retry logic.
 
 ### Key Components
 
-#### 1. EnrolmentManager (`src/enrolment.rs`)
+#### 1. EnrollmentManager (`src/enrollment.rs`)
 
-The `EnrolmentManager` is a fully async component that provides:
+The `EnrollmentManager` is a fully async component that provides:
 
 **`enrol_with_bootstrap(bootstrap_addr)`**
-- Full async enrolment flow with timeout and retry logic
+- Full async enrollment flow with timeout and retry logic
 - 30-second timeout per attempt
 - 3 retry attempts with exponential backoff (1s, 2s, 4s)
 - Returns DIF name on success
 
 **`try_enrol(bootstrap_addr)`**
-- Single enrolment attempt
+- Single enrollment attempt
 - Sends CDAP CREATE message with IPCP name
 - Polls for response asynchronously
 - Updates state to `Enrolled` on success
 
 **`receive_response()`**
-- Async polling for enrolment response
+- Async polling for enrollment response
 - 100ms poll interval
 - Deserializes CDAP messages from PDU payloads
 - Validates response and extracts DIF name
 
-**`handle_enrolment_request_async(pdu, src_socket_addr)`**
-- Bootstrap side: handles incoming enrolment requests
+**`handle_enrollment_request_async(pdu, src_socket_addr)`**
+- Bootstrap side: handles incoming enrollment requests
 - Auto-registers peer socket address for response routing
 - Reads DIF name from RIB
 - Sends CDAP response with DIF name
@@ -259,14 +259,14 @@ Switched from JSON to bincode for better performance:
 
 **Bootstrap Mode:**
 ```rust
-// Creates AsyncEnrolmentManager with DIF name in RIB
+// Creates AsyncEnrollmentManager with DIF name in RIB
 // Listens for incoming PDUs in loop
-// Handles enrolment requests and sends responses
+// Handles enrollment requests and sends responses
 ```
 
 **Member Mode:**
 ```rust
-// Creates AsyncEnrolmentManager with IPCP name
+// Creates AsyncEnrollmentManager with IPCP name
 // Registers bootstrap peer address mapping
 // Calls enrol_with_bootstrap() with retry logic
 // Transitions to Operational on success
@@ -278,7 +278,7 @@ Switched from JSON to bincode for better performance:
 Member IPCP (address 0)              Bootstrap IPCP (address 1001)
 ----------------------------         ------------------------------
      |                                      |
-     | 1. Create AsyncEnrolmentManager      | 1. Setup AsyncEnrolmentManager
+     | 1. Create AsyncEnrollmentManager      | 1. Setup AsyncEnrollmentManager
      |    Register bootstrap peer           |    Store DIF name in RIB
      |    1001 -> 127.0.0.1:7000           |    Bind to 0.0.0.0:7000
      |                                      |
@@ -288,7 +288,7 @@ Member IPCP (address 0)              Bootstrap IPCP (address 1001)
      |------------------------------------>| 3. Receive PDU from socket
      |                                      |    Auto-register: 0 -> sender
      |                                      |
-     |                                      | 4. handle_enrolment_request_async()
+     |                                      | 4. handle_enrollment_request_async()
      |                                      |    Extract IPCP name
      |                                      |    Read DIF name from RIB
      |                                      |    Send CDAP response
@@ -321,21 +321,21 @@ Expected output:
 **Bootstrap:**
 ```
 ✓ Bootstrap IPCP operational!
-  Waiting for enrolment requests from member IPCPs...
+  Waiting for enrollment requests from member IPCPs...
 
   Received PDU from address 0 (127.0.0.1:7001)
-  Received enrolment request from: ipcp-member
-  Sent enrolment response to ipcp-member with DIF name: test-dif
+  Received enrollment request from: ipcp-member
+  Sent enrollment response to ipcp-member with DIF name: test-dif
 ```
 
 **Member:**
 ```
-✓ Initiating enrolment with bootstrap IPCP...
+✓ Initiating enrollment with bootstrap IPCP...
   Registered bootstrap peer: 1001 -> 127.0.0.1:7000
 
-  Attempting enrolment...
-Enrolment attempt 1/3
-Sent enrolment request to bootstrap IPCP
+  Attempting enrollment...
+Enrollment attempt 1/3
+Sent enrollment request to bootstrap IPCP
 Successfully enrolled in DIF: test-dif
 
 🎉 Successfully enrolled in DIF: test-dif
@@ -382,7 +382,7 @@ Potential improvements for future phases:
 
 4. **Security**
    - Mutual authentication
-   - Encrypted enrolment messages
+   - Encrypted enrollment messages
    - Certificate validation
 
 5. **Performance Optimization**

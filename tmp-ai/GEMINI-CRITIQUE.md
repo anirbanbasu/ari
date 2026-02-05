@@ -74,7 +74,7 @@ The code is clean, well-structured, and generally follows idiomatic Rust practic
 
 This is, without a doubt, the project's strongest area. The documentation is outstanding.
 
-*   The new "Enrolment Implementation" section in the `README.md` is excellent. It clearly and honestly communicates what is implemented, how it works, and what is still pending. This level of transparency is fantastic.
+*   The new "Enrollment Implementation" section in the `README.md` is excellent. It clearly and honestly communicates what is implemented, how it works, and what is still pending. This level of transparency is fantastic.
 *   The examples are practical and cover realistic scenarios (single machine, multi-machine, Docker).
 
 No improvements are needed here; this is a model for other projects to follow.

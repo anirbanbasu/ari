@@ -13,7 +13,7 @@ pub mod cdap;
 pub mod config;
 pub mod directory;
 pub mod efcp;
-pub mod enrolment;
+pub mod enrollment;
 pub mod fal;
 pub mod ipcp;
 pub mod pdu;
@@ -30,8 +30,8 @@ pub use actors::{
 pub use cdap::{CdapMessage, CdapOpCode, CdapSession};
 pub use directory::Directory;
 pub use efcp::{Efcp, Flow, FlowConfig};
-pub use enrolment::{
-    DifConfiguration, EnrolmentManager, EnrolmentRequest, EnrolmentResponse, EnrolmentState,
+pub use enrollment::{
+    DifConfiguration, EnrollmentManager, EnrollmentRequest, EnrollmentResponse, EnrollmentState,
     NeighborInfo,
 };
 pub use fal::{AllocatedFlow, FlowAllocator, FlowState};

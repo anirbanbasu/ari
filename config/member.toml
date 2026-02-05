@@ -8,14 +8,14 @@ mode = "member"
 
 [dif]
 name = "production-dif"
-# Address is assigned during enrolment, not specified here
+# Address is assigned during enrollment, not specified here
 
 [shim]
 bind_address = "0.0.0.0"
 bind_port = 7001
 
-[enrolment]
-# List of bootstrap IPCPs to contact for enrolment
+[enrollment]
+# List of bootstrap IPCPs to contact for enrollment
 bootstrap_peers = [
     { address = "127.0.0.1:7000", rina_addr = 1001 }
 ]

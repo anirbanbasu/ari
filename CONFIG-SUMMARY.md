@@ -87,7 +87,7 @@ toml = "0.8"                                        # TOML parsing
 **N Layer (RINA):**
 - `--address 1001` (bootstrap only)
 - This is the DIF-level addressing
-- Member IPCPs get this during enrolment
+- Member IPCPs get this during enrollment
 
 ### 2. Config File Override
 
@@ -161,7 +161,7 @@ cargo run -- \
 
 ### 3. RINA-Compliant
 - Bootstrap IPCP manages address space
-- Member IPCPs get addresses via enrolment
+- Member IPCPs get addresses via enrollment
 - Proper N-1 (shim) and N (DIF) layer separation
 
 ### 4. Testability
@@ -171,9 +171,9 @@ cargo run -- \
 
 ## What's Still TODO
 
-### 1. Full Enrolment Protocol
+### 1. Full Enrollment Protocol
 Currently placeholder implemented. Needs:
-- Actual EnrolmentRequest/Response messages
+- Actual EnrollmentRequest/Response messages
 - CDAP-based RIB synchronization
 - Address assignment logic
 - Neighbor discovery
@@ -251,4 +251,4 @@ The configuration system is **complete and production-ready** for the current ar
 4. **Clear error messages** with usage examples
 5. **Comprehensive documentation** with real-world examples
 
-The foundation is in place for true multi-IPCP communication. The next step is implementing the enrolment protocol and inter-IPCP data exchange.
+The foundation is in place for true multi-IPCP communication. The next step is implementing the enrollment protocol and inter-IPCP data exchange.

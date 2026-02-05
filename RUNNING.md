@@ -81,7 +81,7 @@ address_pool_end = 1999
 bind_address = "0.0.0.0"
 bind_port = 7000
 
-[enrolment]
+[enrollment]
 bootstrap_peers = []
 ```
 
@@ -99,7 +99,7 @@ name = "production-dif"
 bind_address = "0.0.0.0"
 bind_port = 7001
 
-[enrolment]
+[enrollment]
 bootstrap_peers = [
     { address = "127.0.0.1:7000", rina_addr = 1001 }
 ]
@@ -125,7 +125,7 @@ Options:
 ## Architecture Notes
 
 - **Bootstrap IPCP**: Has a static RINA address from configuration, manages address allocation for joining members
-- **Member IPCP**: Gets its RINA address dynamically during enrolment with bootstrap IPCP
+- **Member IPCP**: Gets its RINA address dynamically during enrollment with bootstrap IPCP
 - **N-1 Layer**: UDP/IP shim provides the underlying communication channel
 - **N Layer**: RINA addressing and flows operate at the DIF level
 
@@ -136,6 +136,6 @@ Options:
 ✅ Member IPCP initialization  
 ✅ UDP shim binding  
 ✅ Actor-based components (RIB, EFCP, RMT, Shim)  
-⚠️ Enrolment protocol (placeholder implemented)  
+⚠️ Enrollment protocol (placeholder implemented)  
 ⚠️ CDAP synchronization over network (pending)  
 ⚠️ Full flow allocation between IPCPs (pending)

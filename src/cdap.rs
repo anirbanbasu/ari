@@ -173,7 +173,7 @@ impl CdapSession {
         )
     }
 
-    /// Creates a START request message (for operations like enrolment)
+    /// Creates a START request message (for operations like enrollment)
     pub fn start_request(&mut self, obj_name: String, obj_value: Option<RibValue>) -> CdapMessage {
         CdapMessage::new_request(
             CdapOpCode::Start,

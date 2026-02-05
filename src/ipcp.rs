@@ -8,7 +8,7 @@
 use crate::cdap::CdapSession;
 use crate::directory::Directory;
 use crate::efcp::Efcp;
-use crate::enrolment::{EnrolmentManager, EnrolmentState};
+use crate::enrollment::{EnrollmentManager, EnrollmentState};
 use crate::fal::FlowAllocator;
 use crate::rib::Rib;
 use crate::rmt::Rmt;
@@ -59,8 +59,8 @@ pub struct IpcProcess {
     pub fal: FlowAllocator,
     /// Directory service
     pub directory: Directory,
-    /// Enrolment manager
-    pub enrolment: EnrolmentManager,
+    /// Enrollment manager
+    pub enrollment: EnrollmentManager,
 }
 
 impl IpcProcess {
@@ -69,11 +69,11 @@ impl IpcProcess {
         let rib = Rib::new();
         let address = 0;
         let shim = UdpShim::new(address);
-        let shim_for_enrolment = Arc::new(UdpShim::new(address));
+        let shim_for_enrollment = Arc::new(UdpShim::new(address));
 
         Self {
             cdap: CdapSession::new(rib.clone()),
-            enrolment: EnrolmentManager::new(rib.clone(), shim_for_enrolment),
+            enrollment: EnrollmentManager::new(rib.clone(), shim_for_enrollment),
             rib,
             name: None,
             address: None,
@@ -91,11 +91,11 @@ impl IpcProcess {
     pub fn with_name_and_address(name: String, address: u64) -> Self {
         let rib = Rib::new();
         let shim = UdpShim::new(address);
-        let shim_for_enrolment = Arc::new(UdpShim::new(address));
+        let shim_for_enrollment = Arc::new(UdpShim::new(address));
 
         Self {
             cdap: CdapSession::new(rib.clone()),
-            enrolment: EnrolmentManager::new(rib.clone(), shim_for_enrolment),
+            enrollment: EnrollmentManager::new(rib.clone(), shim_for_enrollment),
             rib,
             name: Some(name),
             address: Some(address),
@@ -138,7 +138,7 @@ impl IpcProcess {
 
     /// Checks if IPCP is enrolled
     pub fn is_enrolled(&self) -> bool {
-        *self.enrolment.state() == EnrolmentState::Enrolled
+        *self.enrollment.state() == EnrollmentState::Enrolled
     }
 
     /// Starts the IPCP
