@@ -8,7 +8,8 @@ mode = "member"
 
 [dif]
 name = "production-dif"
-# Address is assigned during enrollment, not specified here
+# Pre-assigned address (Phase 3 will implement dynamic assignment)
+address = 1002
 
 [shim]
 bind_address = "0.0.0.0"
@@ -25,3 +26,9 @@ timeout_secs = 5
 max_retries = 3
 # Initial backoff in milliseconds (exponential backoff: 1s, 2s, 4s)
 initial_backoff_ms = 1000
+
+[routing]
+# Static route to bootstrap (member learns other routes during enrollment)
+static_routes = [
+    { destination = 1001, next_hop_address = "127.0.0.1:7000", next_hop_rina_addr = 1001 },
+]

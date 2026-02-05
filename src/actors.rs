@@ -137,6 +137,7 @@ pub enum EfcpMessage {
 pub struct EfcpActor {
     efcp: Arc<RwLock<Efcp>>,
     receiver: mpsc::Receiver<EfcpMessage>,
+    rmt_handle: Option<RmtHandle>,
 }
 
 impl EfcpActor {
@@ -144,7 +145,12 @@ impl EfcpActor {
         Self {
             efcp: Arc::new(RwLock::new(Efcp::new())),
             receiver,
+            rmt_handle: None,
         }
+    }
+
+    pub fn set_rmt_handle(&mut self, handle: RmtHandle) {
+        self.rmt_handle = Some(handle);
     }
 
     pub async fn run(mut self) {
@@ -170,6 +176,23 @@ impl EfcpActor {
                         .get_flow_mut(flow_id)
                         .ok_or_else(|| format!("Flow {} not found", flow_id))
                         .and_then(|flow| flow.send_data(data));
+
+                    // Forward PDU to RMT if successful
+                    if let (Ok(pdu), Some(rmt_handle)) = (&result, &self.rmt_handle) {
+                        let (tx, mut rx) = mpsc::channel(1);
+                        if (rmt_handle
+                            .sender
+                            .send(RmtMessage::ProcessOutgoing {
+                                pdu: pdu.clone(),
+                                response: tx,
+                            })
+                            .await)
+                            .is_ok()
+                        {
+                            let _ = rx.recv().await;
+                        }
+                    }
+
                     let _ = response.send(result).await;
                 }
                 EfcpMessage::ReceivePdu { pdu, response } => {
@@ -224,6 +247,8 @@ pub enum RmtMessage {
 pub struct RmtActor {
     rmt: Arc<RwLock<Rmt>>,
     receiver: mpsc::Receiver<RmtMessage>,
+    shim_handle: Option<ShimHandle>,
+    rib_handle: Option<RibHandle>,
 }
 
 impl RmtActor {
@@ -231,6 +256,65 @@ impl RmtActor {
         Self {
             rmt: Arc::new(RwLock::new(Rmt::new(local_addr))),
             receiver,
+            shim_handle: None,
+            rib_handle: None,
+        }
+    }
+
+    pub fn set_shim_handle(&mut self, handle: ShimHandle) {
+        self.shim_handle = Some(handle);
+    }
+
+    pub fn set_rib_handle(&mut self, handle: RibHandle) {
+        self.rib_handle = Some(handle);
+    }
+
+    /// Populate forwarding table from RIB routes
+    pub async fn populate_forwarding_table(&self) {
+        if let Some(rib_handle) = &self.rib_handle {
+            // Get all routes from RIB
+            let (tx, mut rx) = mpsc::channel(1);
+            let _ = rib_handle
+                .send(RibMessage::ListByClass {
+                    class: "route".to_string(),
+                    response: tx,
+                })
+                .await;
+
+            if let Some(route_names) = rx.recv().await {
+                for route_name in route_names {
+                    // Read each route
+                    let (tx, mut rx) = mpsc::channel(1);
+                    let _ = rib_handle
+                        .send(RibMessage::Read {
+                            name: route_name.clone(),
+                            response: tx,
+                        })
+                        .await;
+
+                    if let Some(Some(route_value)) = rx.recv().await
+                        && let RibValue::Struct(fields) = route_value
+                    {
+                        // Extract destination and next_hop from route
+                        if let (Some(dest_box), Some(next_hop_box)) =
+                            (fields.get("destination"), fields.get("next_hop_rina_addr"))
+                            && let (RibValue::String(dest_str), RibValue::String(next_hop_str)) =
+                                (dest_box.as_ref(), next_hop_box.as_ref())
+                            && let (Ok(dst_addr), Ok(next_hop)) =
+                                (dest_str.parse::<u64>(), next_hop_str.parse::<u64>())
+                        {
+                            let entry = ForwardingEntry {
+                                dst_addr,
+                                next_hop,
+                                cost: 1,
+                            };
+                            let mut rmt = self.rmt.write().await;
+                            rmt.add_forwarding_entry(entry);
+                            println!("📋 Added forwarding entry: {} → {}", dst_addr, next_hop);
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -244,7 +328,47 @@ impl RmtActor {
                 }
                 RmtMessage::ProcessOutgoing { pdu, response } => {
                     let mut rmt = self.rmt.write().await;
-                    let result = rmt.process_outgoing(pdu);
+                    let result = rmt.process_outgoing(pdu.clone());
+
+                    // If successful, send PDU via Shim
+                    if let (Ok(_next_hop), Some(shim_handle)) = (&result, &self.shim_handle) {
+                        // Serialize and send PDU
+                        if let Ok(pdu_bytes) = bincode::serialize(&pdu) {
+                            // Get the socket address for next_hop from RIB
+                            if let Some(rib_handle) = &self.rib_handle {
+                                let route_name = format!("/routing/static/{}", pdu.dst_addr);
+                                let (tx, mut rx) = mpsc::channel(1);
+                                let _ = rib_handle
+                                    .send(RibMessage::Read {
+                                        name: route_name,
+                                        response: tx,
+                                    })
+                                    .await;
+
+                                if let Some(Some(RibValue::Struct(fields))) = rx.recv().await
+                                    && let Some(socket_addr_box) = fields.get("next_hop_address")
+                                    && let RibValue::String(socket_addr) = socket_addr_box.as_ref()
+                                {
+                                    let (tx, mut rx) = mpsc::channel(1);
+                                    let _ = shim_handle
+                                        .send(ShimMessage::Send {
+                                            data: pdu_bytes,
+                                            dest: socket_addr.clone(),
+                                            response: tx,
+                                        })
+                                        .await;
+
+                                    if let Some(Ok(_)) = rx.recv().await {
+                                        println!(
+                                            "📤 Sent PDU to {} via {}",
+                                            pdu.dst_addr, socket_addr
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     let _ = response.send(result).await;
                 }
                 RmtMessage::ProcessIncoming { pdu, response } => {
@@ -390,9 +514,16 @@ impl ShimActor {
 }
 
 /// Actor handle for sending messages to an actor
-#[derive(Clone)]
 pub struct ActorHandle<T> {
     sender: mpsc::Sender<T>,
+}
+
+impl<T> Clone for ActorHandle<T> {
+    fn clone(&self) -> Self {
+        Self {
+            sender: self.sender.clone(),
+        }
+    }
 }
 
 impl<T> ActorHandle<T> {

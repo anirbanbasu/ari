@@ -12,11 +12,12 @@ build-release:
 
 # Install required cargo tools
 install-tools:
-    @echo "Installing required cargo tools..."
+    @echo "Installing required cargo and Rust tools..."
+    @cargo install tokei
     @cargo install cargo-edit
     @cargo install cargo-llvm-cov
     @rustup component add clippy
-    @echo "Cargo tools installed."
+    @echo "Cargo and Rust tools installed."
 
 # Install pre-commit hooks using 'prek'
 install-pre-commit-hooks:
@@ -66,3 +67,9 @@ coverage:
     @echo "Generating test coverage report..."
     @cargo llvm-cov --html
     @echo "Coverage report generated. Open target/llvm-cov/html/index.html to view."
+
+# Count lines of code and documentation
+count-lines:
+    @echo "Counting lines of code and documentation..."
+    @tokei --hidden --exclude target
+    @echo "Line count complete."

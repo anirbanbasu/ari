@@ -73,7 +73,7 @@ impl IpcProcess {
 
         Self {
             cdap: CdapSession::new(rib.clone()),
-            enrollment: EnrollmentManager::new(rib.clone(), shim_for_enrollment),
+            enrollment: EnrollmentManager::new(rib.clone(), shim_for_enrollment, address),
             rib,
             name: None,
             address: None,
@@ -95,7 +95,7 @@ impl IpcProcess {
 
         Self {
             cdap: CdapSession::new(rib.clone()),
-            enrollment: EnrollmentManager::new(rib.clone(), shim_for_enrollment),
+            enrollment: EnrollmentManager::new(rib.clone(), shim_for_enrollment, address),
             rib,
             name: Some(name),
             address: Some(address),

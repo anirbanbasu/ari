@@ -351,7 +351,7 @@ async fn run_demo_mode() {
     println!("=== 8. Enrollment Manager ===");
     let rib = ari::Rib::new();
     let shim_for_em = Arc::new(ari::UdpShim::new(local_addr));
-    let mut em = EnrollmentManager::new(rib, shim_for_em);
+    let mut em = EnrollmentManager::new(rib, shim_for_em, local_addr);
     em.set_ipcp_name("ipcp-1".to_string());
     println!("  Initiated enrollment for ipcp-1");
     println!("  Enrollment state: {:?}\n", em.state());
@@ -434,27 +434,42 @@ async fn run_bootstrap_mode(config: IpcpConfiguration) {
     });
     println!("  → RIB Actor spawned");
 
-    // EFCP Actor
+    // Create all channels first
     let (efcp_tx, efcp_rx) = mpsc::channel(32);
     let _efcp_handle = EfcpHandle::new(efcp_tx);
+
+    let (rmt_tx, rmt_rx) = mpsc::channel(32);
+    let rmt_handle = RmtHandle::new(rmt_tx);
+
+    let (shim_tx, shim_rx) = mpsc::channel(32);
+    let shim_handle = ShimHandle::new(shim_tx);
+
+    // Spawn EFCP Actor with RMT handle
+    let rmt_for_efcp = rmt_handle.clone();
     tokio::spawn(async move {
-        let actor = EfcpActor::new(efcp_rx);
+        let mut actor = EfcpActor::new(efcp_rx);
+        actor.set_rmt_handle(rmt_for_efcp);
         actor.run().await;
     });
     println!("  → EFCP Actor spawned");
 
-    // RMT Actor
-    let (rmt_tx, rmt_rx) = mpsc::channel(32);
-    let _rmt_handle = RmtHandle::new(rmt_tx);
+    // Spawn RMT Actor with Shim and RIB handles
+    let shim_for_rmt = shim_handle.clone();
+    let rib_for_rmt = rib_handle.clone();
     tokio::spawn(async move {
-        let actor = RmtActor::new(local_addr, rmt_rx);
+        let mut actor = RmtActor::new(local_addr, rmt_rx);
+        actor.set_shim_handle(shim_for_rmt);
+        actor.set_rib_handle(rib_for_rmt);
+
+        // Populate forwarding table from RIB after routes are loaded
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        actor.populate_forwarding_table().await;
+
         actor.run().await;
     });
     println!("  → RMT Actor spawned");
 
-    // Shim Actor
-    let (shim_tx, shim_rx) = mpsc::channel(32);
-    let _shim_handle = ShimHandle::new(shim_tx);
+    // Spawn Shim Actor
     tokio::spawn(async move {
         let actor = ShimActor::new(local_addr, shim_rx);
         actor.run().await;
@@ -543,7 +558,8 @@ async fn run_bootstrap_mode(config: IpcpConfiguration) {
         max_retries: config.enrollment_max_retries,
         initial_backoff_ms: config.enrollment_initial_backoff_ms,
     };
-    let enrollment_mgr = EnrollmentManager::with_config(rib, shim.clone(), enrollment_config);
+    let enrollment_mgr =
+        EnrollmentManager::with_config(rib, shim.clone(), local_addr, enrollment_config);
     println!(
         "  Enrollment manager ready (timeout: {}s, retries: {})",
         config.enrollment_timeout_secs, config.enrollment_max_retries
@@ -561,11 +577,8 @@ async fn run_bootstrap_mode(config: IpcpConfiguration) {
                 "  Received PDU from address {} ({})",
                 pdu.src_addr, src_addr
             );
-            if let Err(e) = enrollment_mgr
-                .handle_enrollment_request(&pdu, src_addr)
-                .await
-            {
-                eprintln!("  Failed to handle enrollment request: {}", e);
+            if let Err(e) = enrollment_mgr.handle_cdap_message(&pdu, src_addr).await {
+                eprintln!("  Failed to handle CDAP message: {}", e);
             }
         }
     }
@@ -575,8 +588,8 @@ async fn run_bootstrap_mode(config: IpcpConfiguration) {
 async fn run_member_mode(config: IpcpConfiguration) {
     println!("=== RINA Member IPCP ===\n");
 
-    // Member starts without a RINA address (will get one during enrollment)
-    let local_addr = 0; // Placeholder until enrollment
+    // Member uses configured address (Phase 3 will implement dynamic assignment)
+    let local_addr = config.address.expect("Member mode requires a pre-configured address until Phase 3 dynamic assignment is implemented");
 
     // Spawn actor tasks
     println!("✓ Spawning RINA component actors...\n");
@@ -629,6 +642,39 @@ async fn run_member_mode(config: IpcpConfiguration) {
     // Set up async enrollment manager
     println!("\n✓ Setting up enrollment manager...");
     let rib = Rib::new();
+
+    // Load static routes into RIB (before enrollment)
+    println!("\n✓ Loading static routes into RIB...");
+    for route in &config.static_routes {
+        let route_name = format!("/routing/static/{}", route.destination);
+        let route_value = ari::rib::RibValue::Struct({
+            let mut map = std::collections::HashMap::new();
+            map.insert(
+                "destination".to_string(),
+                Box::new(ari::rib::RibValue::String(route.destination.to_string())),
+            );
+            map.insert(
+                "next_hop_address".to_string(),
+                Box::new(ari::rib::RibValue::String(route.next_hop_address.clone())),
+            );
+            map.insert(
+                "next_hop_rina_addr".to_string(),
+                Box::new(ari::rib::RibValue::Integer(route.next_hop_rina_addr as i64)),
+            );
+            map
+        });
+
+        rib.create(route_name.clone(), "static_route".to_string(), route_value)
+            .await
+            .unwrap();
+
+        println!(
+            "  Route: {} → {} ({})",
+            route.destination, route.next_hop_address, route.next_hop_rina_addr
+        );
+    }
+    println!("  Loaded {} static routes", config.static_routes.len());
+
     let shim = Arc::new(UdpShim::new(local_addr));
 
     // Bind shim to UDP socket
@@ -643,7 +689,8 @@ async fn run_member_mode(config: IpcpConfiguration) {
         max_retries: config.enrollment_max_retries,
         initial_backoff_ms: config.enrollment_initial_backoff_ms,
     };
-    let mut enrollment_mgr = EnrollmentManager::with_config(rib, shim.clone(), enrollment_config);
+    let mut enrollment_mgr =
+        EnrollmentManager::with_config(rib, shim.clone(), local_addr, enrollment_config);
     enrollment_mgr.set_ipcp_name(config.name.clone());
     println!(
         "  Enrollment manager ready (timeout: {}s, retries: {})",

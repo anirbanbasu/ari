@@ -109,6 +109,8 @@ pub struct EnrollmentManager {
     state: EnrollmentState,
     /// Local IPCP name
     ipcp_name: Option<String>,
+    /// Local RINA address
+    local_addr: u64,
     /// Local RIB
     rib: Rib,
     /// UDP shim for network communication
@@ -119,15 +121,21 @@ pub struct EnrollmentManager {
 
 impl EnrollmentManager {
     /// Creates a new enrollment manager
-    pub fn new(rib: Rib, shim: Arc<UdpShim>) -> Self {
-        Self::with_config(rib, shim, EnrollmentConfig::default())
+    pub fn new(rib: Rib, shim: Arc<UdpShim>, local_addr: u64) -> Self {
+        Self::with_config(rib, shim, local_addr, EnrollmentConfig::default())
     }
 
     /// Creates a new enrollment manager with custom configuration
-    pub fn with_config(rib: Rib, shim: Arc<UdpShim>, config: EnrollmentConfig) -> Self {
+    pub fn with_config(
+        rib: Rib,
+        shim: Arc<UdpShim>,
+        local_addr: u64,
+        config: EnrollmentConfig,
+    ) -> Self {
         Self {
             state: EnrollmentState::NotEnrolled,
             ipcp_name: None,
+            local_addr,
             rib,
             shim,
             config,
@@ -203,12 +211,12 @@ impl EnrollmentManager {
 
         // Create PDU with CDAP payload
         let pdu = Pdu::new_data(
-            0,              // src_addr - member doesn't have address yet
-            bootstrap_addr, // dst_addr
-            0,              // src_cep_id
-            0,              // dst_cep_id
-            0,              // sequence_num
-            cdap_bytes,     // payload
+            self.local_addr, // src_addr - member's configured address
+            bootstrap_addr,  // dst_addr
+            0,               // src_cep_id
+            0,               // dst_cep_id
+            0,               // sequence_num
+            cdap_bytes,      // payload
         );
 
         // Send enrollment request
@@ -265,14 +273,14 @@ impl EnrollmentManager {
         let cdap_bytes = bincode::serialize(&cdap_msg)
             .map_err(|e| format!("Failed to serialize CDAP message: {}", e))?;
 
-        let pdu = Pdu::new_data(0, bootstrap_addr, 0, 0, 0, cdap_bytes);
+        let pdu = Pdu::new_data(self.local_addr, bootstrap_addr, 0, 0, 0, cdap_bytes);
 
         self.shim
             .send_pdu(&pdu)
             .map_err(|e| format!("Failed to send route request: {}", e))?;
 
-        // Wait for routing table response
-        match self.receive_response().await {
+        // Wait for routing table response (no filter on obj_class)
+        match self.receive_cdap_response(None).await {
             Ok(response) => {
                 if let Some(RibValue::Struct(routes)) = response.obj_value {
                     println!("Received {} routes from bootstrap", routes.len());
@@ -297,6 +305,14 @@ impl EnrollmentManager {
 
     /// Receive enrollment response with polling
     async fn receive_response(&self) -> Result<CdapMessage, String> {
+        self.receive_cdap_response(Some("enrollment")).await
+    }
+
+    /// Receive any CDAP response with polling
+    async fn receive_cdap_response(
+        &self,
+        expected_class: Option<&str>,
+    ) -> Result<CdapMessage, String> {
         let poll_interval = Duration::from_millis(100);
         let max_polls = (self.config.timeout.as_millis() / poll_interval.as_millis()) as u32;
 
@@ -310,15 +326,21 @@ impl EnrollmentManager {
                 let cdap_msg: CdapMessage = bincode::deserialize(&pdu.payload)
                     .map_err(|e| format!("Failed to deserialize CDAP message: {}", e))?;
 
-                // Check if this is an enrollment response
-                if cdap_msg.obj_class.as_deref() == Some("enrollment") {
+                // If expected_class is specified, filter by it
+                if let Some(expected) = expected_class {
+                    if cdap_msg.obj_class.as_deref() == Some(expected) {
+                        if cdap_msg.result == 0 {
+                            return Ok(cdap_msg);
+                        } else {
+                            return Err(format!("Request rejected with code: {}", cdap_msg.result));
+                        }
+                    }
+                } else {
+                    // Accept any CDAP message if no filter specified
                     if cdap_msg.result == 0 {
                         return Ok(cdap_msg);
                     } else {
-                        return Err(format!(
-                            "Enrollment rejected with code: {}",
-                            cdap_msg.result
-                        ));
+                        return Err(format!("Request rejected with code: {}", cdap_msg.result));
                     }
                 }
             }
@@ -326,7 +348,7 @@ impl EnrollmentManager {
             sleep(poll_interval).await;
         }
 
-        Err("No enrollment response received".to_string())
+        Err("No response received".to_string())
     }
 
     /// Handle incoming enrollment request (bootstrap side)
@@ -387,12 +409,12 @@ impl EnrollmentManager {
 
         // Create response PDU
         let response_pdu = Pdu::new_data(
-            0,              // src_addr
-            pdu.src_addr,   // dst_addr - respond to sender
-            0,              // src_cep_id
-            0,              // dst_cep_id
-            0,              // sequence_num
-            response_bytes, // payload
+            self.local_addr, // src_addr - bootstrap's address
+            pdu.src_addr,    // dst_addr - respond to sender
+            0,               // src_cep_id
+            0,               // dst_cep_id
+            0,               // sequence_num
+            response_bytes,  // payload
         );
 
         // Send response
@@ -404,6 +426,102 @@ impl EnrollmentManager {
             "Sent enrollment response to {} with DIF name: {}",
             requesting_ipcp, dif_name
         );
+
+        // Add dynamic route for the enrolled member
+        if pdu.src_addr != 0 {
+            let route_name = format!("/routing/dynamic/{}", pdu.src_addr);
+
+            // Check if route already exists
+            if self.rib.read(&route_name).await.is_none() {
+                // Route doesn't exist, create it
+                let route_value = RibValue::Struct({
+                    let mut map = std::collections::HashMap::new();
+                    map.insert(
+                        "destination".to_string(),
+                        Box::new(RibValue::String(pdu.src_addr.to_string())),
+                    );
+                    map.insert(
+                        "next_hop_address".to_string(),
+                        Box::new(RibValue::String(src_socket_addr.to_string())),
+                    );
+                    map.insert(
+                        "next_hop_rina_addr".to_string(),
+                        Box::new(RibValue::String(pdu.src_addr.to_string())),
+                    );
+                    map
+                });
+
+                self.rib
+                    .create(route_name.clone(), "route".to_string(), route_value)
+                    .await
+                    .map_err(|e| format!("Failed to create dynamic route: {}", e))?;
+
+                println!(
+                    "  ✓ Created dynamic route: {} → {} ({})",
+                    pdu.src_addr, src_socket_addr, requesting_ipcp
+                );
+            }
+        } else {
+            println!("  ⚠ Member enrolled with address 0, skipping route creation");
+        }
+
+        Ok(())
+    }
+
+    /// Handle incoming CDAP message (routes to appropriate handler)
+    pub async fn handle_cdap_message(
+        &self,
+        pdu: &Pdu,
+        src_socket_addr: SocketAddr,
+    ) -> Result<(), String> {
+        // Deserialize CDAP message from PDU payload
+        let cdap_msg: CdapMessage = bincode::deserialize(&pdu.payload)
+            .map_err(|e| format!("Failed to deserialize CDAP message: {}", e))?;
+
+        // Route based on operation type and object class
+        match (&cdap_msg.op_code, cdap_msg.obj_class.as_deref()) {
+            // Enrollment request
+            (CdapOpCode::Create, Some("enrollment")) => {
+                self.handle_enrollment_request(pdu, src_socket_addr).await
+            }
+            // Routing table read request
+            (CdapOpCode::Read, _) if cdap_msg.obj_name.starts_with("/routing/") => {
+                self.handle_routing_read_request(pdu, &cdap_msg).await
+            }
+            // Unknown/unhandled message type
+            _ => {
+                // Silently ignore other message types for now
+                Ok(())
+            }
+        }
+    }
+
+    /// Handle routing table read request
+    async fn handle_routing_read_request(
+        &self,
+        pdu: &Pdu,
+        request: &CdapMessage,
+    ) -> Result<(), String> {
+        // For now, return an empty routing table since member has static routes
+        // In future phases, this could return actual routing information
+        let response = CdapMessage {
+            op_code: CdapOpCode::Read,
+            obj_name: request.obj_name.clone(),
+            obj_class: request.obj_class.clone(),
+            obj_value: Some(RibValue::Struct(std::collections::HashMap::new())),
+            invoke_id: request.invoke_id,
+            result: 0,
+            result_reason: None,
+        };
+
+        let response_bytes = bincode::serialize(&response)
+            .map_err(|e| format!("Failed to serialize routing response: {}", e))?;
+
+        let response_pdu = Pdu::new_data(self.local_addr, pdu.src_addr, 0, 0, 0, response_bytes);
+
+        self.shim
+            .send_pdu(&response_pdu)
+            .map_err(|e| format!("Failed to send routing response: {}", e))?;
 
         Ok(())
     }
@@ -417,7 +535,7 @@ mod tests {
     async fn test_enrollment_state() {
         let rib = Rib::new();
         let shim = Arc::new(UdpShim::new(0));
-        let mut em = EnrollmentManager::new(rib, shim);
+        let mut em = EnrollmentManager::new(rib, shim, 1000);
 
         assert_eq!(*em.state(), EnrollmentState::NotEnrolled);
         assert!(!em.is_enrolled());

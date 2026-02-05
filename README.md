@@ -3,6 +3,8 @@ ARI - _A RINA Implementation_ is a Rust implementation of the [Recursive Interne
 
 The acronym 'ARI' is intentionally chosen to reflect both an expanded 'A RINA Implementation' and imply the similarities between networking and ant colonies where the Japanese word for ant, [蟻](https://jisho.org/search/%E8%9F%BB) or mostly written as アリ, is pronounced as 'ari'.
 
+**WARNING**: _The code in this repository has been mostly coded by coding agents backed by large language models (LLMs) and is currently under active development. All of the code has not been thoroughly cross-checked for correctness. It is not production-ready and should be used for educational and experimental purposes only. Use at your own risk_.
+
 ## Quick Start
 
 ### Demo Mode
@@ -31,21 +33,25 @@ The current documentation is scattered and will be consolidated over time. For n
 - **[CONFIG-EXAMPLES.md](CONFIG-EXAMPLES.md)** - Comprehensive configuration examples
 - **[CONFIG-SUMMARY.md](CONFIG-SUMMARY.md)** - Implementation details
 - **[ENROLLMENT-PHASES.md](ENROLLMENT-PHASES.md)** - Enrollment implementation guide
+- **[PHASE1-IMPLEMENTATION.md](PHASE1-IMPLEMENTATION.md)** - Phase 1 data path implementation
+- **[PHASE2-IMPLEMENTATION.md](PHASE2-IMPLEMENTATION.md)** - Phase 2 flow creation & data transfer
 
 ## Features
 
 ### Implemented
-- ✅ Resource Information Base (RIB)
+- ✅ Resource Information Base (RIB) with async operations
 - ✅ Common Distributed Application Protocol (CDAP)
-- ✅ Error and Flow Control Protocol (EFCP)
-- ✅ Relaying and Multiplexing Task (RMT)
-- ✅ UDP/IP Shim Layer
+- ✅ Error and Flow Control Protocol (EFCP) with flow creation
+- ✅ Relaying and Multiplexing Task (RMT) with forwarding
+- ✅ UDP/IP Shim Layer with bidirectional communication
 - ✅ Directory Service
-- ✅ Flow Allocator
-- ✅ Enrollment Manager
+- ✅ Flow Allocator with basic flow API
+- ✅ Enrollment Manager with configurable timeouts
 - ✅ Pluggable Policies (Routing, QoS, Scheduling)
 - ✅ Actor-based concurrent components
 - ✅ Multi-IPCP configuration system
+- ✅ Static routing with hybrid learning
+- ✅ End-to-end data transfer (Phase 2)
 
 ### In Progress
 - ⚠️ Full enrollment protocol implementation
