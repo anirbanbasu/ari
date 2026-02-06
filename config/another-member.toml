@@ -2,7 +2,7 @@
 # This IPCP will enroll with the bootstrap IPCP to join the DIF
 
 [ipcp]
-name = "ipcp-member-1"
+name = "ipcp-member-2"
 type = "normal"
 mode = "member"
 
@@ -14,7 +14,7 @@ address = 0
 
 [shim]
 bind_address = "0.0.0.0"
-bind_port = 7001
+bind_port = 7002
 
 [enrollment]
 # List of bootstrap IPCPs to contact for enrollment

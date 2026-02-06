@@ -56,6 +56,12 @@ type-check-and-lint:
     @cargo clippy -- -D warnings
     @echo "Type checking and linting complete."
 
+# Fix with clippy
+clippy-fix:
+    @echo "Running clippy with automatic fixes..."
+    @cargo clippy --fix --allow-dirty --allow-staged
+    @echo "Clippy fixes applied."
+
 # Run tests
 test:
     @echo "Running tests..."

@@ -137,6 +137,9 @@ pub enum RmtError {
     #[error("No route to destination: {0}")]
     NoRoute(u64),
 
+    #[error("Route not found for destination: {0}")]
+    RouteNotFound(u64),
+
     #[error("Queue full for next hop: {0}")]
     QueueFull(u64),
 
@@ -148,6 +151,9 @@ pub enum RmtError {
 
     #[error("Next hop unreachable: {0}")]
     NextHopUnreachable(u64),
+
+    #[error("Network error: {0}")]
+    Network(String),
 }
 
 /// EFCP-specific errors

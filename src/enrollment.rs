@@ -11,6 +11,7 @@ use crate::directory::AddressPool;
 use crate::error::EnrollmentError;
 use crate::pdu::Pdu;
 use crate::rib::{Rib, RibValue};
+use crate::routing::RouteResolver;
 use crate::shim::UdpShim;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
@@ -140,6 +141,8 @@ pub struct EnrollmentManager {
     last_heartbeat: Arc<RwLock<Option<Instant>>>,
     /// Whether re-enrollment is in progress
     re_enrollment_in_progress: Arc<RwLock<bool>>,
+    /// Route resolver for managing dynamic routes
+    route_resolver: Option<Arc<RouteResolver>>,
 }
 
 impl EnrollmentManager {
@@ -166,6 +169,7 @@ impl EnrollmentManager {
             bootstrap_addr: None,
             last_heartbeat: Arc::new(RwLock::new(None)),
             re_enrollment_in_progress: Arc::new(RwLock::new(false)),
+            route_resolver: None,
         }
     }
 
@@ -188,7 +192,13 @@ impl EnrollmentManager {
             bootstrap_addr: None, // Bootstrap has no bootstrap
             last_heartbeat: Arc::new(RwLock::new(Some(Instant::now()))),
             re_enrollment_in_progress: Arc::new(RwLock::new(false)),
+            route_resolver: None,
         }
+    }
+
+    /// Set route resolver (must be called before enrollment operations)
+    pub fn set_route_resolver(&mut self, resolver: Arc<RouteResolver>) {
+        self.route_resolver = Some(resolver);
     }
 
     /// Sets the IPCP name
@@ -628,34 +638,14 @@ impl EnrollmentManager {
                 );
             }
 
-            let route_name = format!("/routing/dynamic/{}", member_addr);
-
-            // Check if route already exists
-            if self.rib.read(&route_name).await.is_none() {
-                // Route doesn't exist, create it
-                let route_value = RibValue::Struct({
-                    let mut map = std::collections::HashMap::new();
-                    map.insert(
-                        "destination".to_string(),
-                        Box::new(RibValue::String(member_addr.to_string())),
-                    );
-                    map.insert(
-                        "next_hop_address".to_string(),
-                        Box::new(RibValue::String(src_socket_addr.to_string())),
-                    );
-                    map.insert(
-                        "next_hop_rina_addr".to_string(),
-                        Box::new(RibValue::String(member_addr.to_string())),
-                    );
-                    map
-                });
-
-                self.rib
-                    .create(route_name.clone(), "route".to_string(), route_value)
+            // Use RouteResolver to add dynamic route
+            if let Some(resolver) = &self.route_resolver {
+                resolver
+                    .add_dynamic_route(member_addr, src_socket_addr, None)
                     .await
                     .map_err(|e| {
                         EnrollmentError::RibSyncFailed(format!(
-                            "Failed to create dynamic route: {}",
+                            "Failed to add dynamic route: {}",
                             e
                         ))
                     })?;
@@ -664,6 +654,8 @@ impl EnrollmentManager {
                     "  ✓ Created dynamic route: {} → {} ({})",
                     member_addr, src_socket_addr, enroll_request.ipcp_name
                 );
+            } else {
+                eprintln!("  ⚠ RouteResolver not set, cannot add dynamic route");
             }
         } else {
             println!("  ⚠ Member enrolled with address 0, skipping route creation");

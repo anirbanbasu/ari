@@ -5,10 +5,12 @@
 
 use ari::actors::*;
 use ari::efcp::FlowConfig;
-
-use ari::rib::RibValue;
+use ari::rib::{Rib, RibValue};
+use ari::routing::{RouteResolver, RouteResolverConfig};
 use std::collections::HashMap;
-use tokio::sync::mpsc;
+use std::path::PathBuf;
+use std::sync::Arc;
+use tokio::sync::{RwLock, mpsc};
 
 #[tokio::test]
 async fn test_flow_creation_and_data_transfer() {
@@ -22,7 +24,7 @@ async fn test_flow_creation_and_data_transfer() {
 
     // Create actors for bootstrap
     let (bootstrap_rib_tx, bootstrap_rib_rx) = mpsc::channel(32);
-    let bootstrap_rib_handle = RibHandle::new(bootstrap_rib_tx);
+    let _bootstrap_rib_handle = RibHandle::new(bootstrap_rib_tx);
 
     let (bootstrap_efcp_tx, bootstrap_efcp_rx) = mpsc::channel(32);
     let bootstrap_efcp_handle = EfcpHandle::new(bootstrap_efcp_tx);
@@ -46,17 +48,26 @@ async fn test_flow_creation_and_data_transfer() {
         actor.run().await;
     });
 
+    // Create RouteResolver for bootstrap
+    let bootstrap_rib = Rib::new();
+    let bootstrap_rib_arc = Arc::new(RwLock::new(bootstrap_rib));
+    let bootstrap_resolver_config = RouteResolverConfig {
+        enable_persistence: false,
+        snapshot_path: PathBuf::from("test-bootstrap-routes.toml"),
+        default_ttl_seconds: 3600,
+        snapshot_interval_seconds: 0,
+    };
+    let bootstrap_route_resolver = Arc::new(RouteResolver::new(
+        bootstrap_rib_arc.clone(),
+        bootstrap_resolver_config,
+    ));
+
     let bootstrap_shim_for_rmt = bootstrap_shim_handle.clone();
-    let bootstrap_rib_for_rmt = bootstrap_rib_handle.clone();
+    let bootstrap_resolver_for_rmt = bootstrap_route_resolver.clone();
     tokio::spawn(async move {
         let mut actor = RmtActor::new(bootstrap_addr, bootstrap_rmt_rx);
         actor.set_shim_handle(bootstrap_shim_for_rmt);
-        actor.set_rib_handle(bootstrap_rib_for_rmt);
-
-        // Populate forwarding table from RIB
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-        actor.populate_forwarding_table().await;
-
+        actor.set_route_resolver(bootstrap_resolver_for_rmt);
         actor.run().await;
     });
 
@@ -65,37 +76,26 @@ async fn test_flow_creation_and_data_transfer() {
         actor.run().await;
     });
 
-    // Load static route into RIB via RibHandle
+    // Load static route into RouteResolver
     {
         let route_name = "/routing/static/1002".to_string();
         let route_value = RibValue::Struct({
             let mut map = HashMap::new();
-            map.insert(
-                "destination".to_string(),
-                Box::new(RibValue::String("1002".to_string())),
-            );
             map.insert(
                 "next_hop_address".to_string(),
                 Box::new(RibValue::String("127.0.0.1:9001".to_string())),
             );
             map.insert(
                 "next_hop_rina_addr".to_string(),
-                Box::new(RibValue::String("1002".to_string())),
+                Box::new(RibValue::Integer(1002)),
             );
             map
         });
 
-        let (tx, mut rx) = mpsc::channel(1);
-        bootstrap_rib_handle
-            .send(RibMessage::Create {
-                name: route_name,
-                class: "route".to_string(),
-                value: route_value,
-                response: tx,
-            })
+        let rib = bootstrap_rib_arc.read().await;
+        rib.create(route_name, "static_route".to_string(), route_value)
             .await
             .unwrap();
-        rx.recv().await.unwrap().unwrap();
         println!("  ✓ Loaded route: 1002 → 127.0.0.1:9001");
     }
 
@@ -123,7 +123,7 @@ async fn test_flow_creation_and_data_transfer() {
 
     // Create actors for member
     let (member_rib_tx, member_rib_rx) = mpsc::channel(32);
-    let member_rib_handle = RibHandle::new(member_rib_tx);
+    let _member_rib_handle = RibHandle::new(member_rib_tx);
 
     let (member_efcp_tx, member_efcp_rx) = mpsc::channel(32);
     let _member_efcp_handle = EfcpHandle::new(member_efcp_tx);
@@ -147,17 +147,26 @@ async fn test_flow_creation_and_data_transfer() {
         actor.run().await;
     });
 
+    // Create RouteResolver for member
+    let member_rib = Rib::new();
+    let member_rib_arc = Arc::new(RwLock::new(member_rib));
+    let member_resolver_config = RouteResolverConfig {
+        enable_persistence: false,
+        snapshot_path: PathBuf::from("test-member-routes.toml"),
+        default_ttl_seconds: 3600,
+        snapshot_interval_seconds: 0,
+    };
+    let member_route_resolver = Arc::new(RouteResolver::new(
+        member_rib_arc.clone(),
+        member_resolver_config,
+    ));
+
     let member_shim_for_rmt = member_shim_handle.clone();
-    let member_rib_for_rmt = member_rib_handle.clone();
+    let member_resolver_for_rmt = member_route_resolver.clone();
     tokio::spawn(async move {
         let mut actor = RmtActor::new(member_addr, member_rmt_rx);
         actor.set_shim_handle(member_shim_for_rmt);
-        actor.set_rib_handle(member_rib_for_rmt);
-
-        // Populate forwarding table from RIB
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-        actor.populate_forwarding_table().await;
-
+        actor.set_route_resolver(member_resolver_for_rmt);
         actor.run().await;
     });
 
@@ -166,37 +175,26 @@ async fn test_flow_creation_and_data_transfer() {
         actor.run().await;
     });
 
-    // Load reverse route into RIB via RibHandle
+    // Load reverse route into RouteResolver
     {
         let route_name = "/routing/static/1001".to_string();
         let route_value = RibValue::Struct({
             let mut map = HashMap::new();
-            map.insert(
-                "destination".to_string(),
-                Box::new(RibValue::String("1001".to_string())),
-            );
             map.insert(
                 "next_hop_address".to_string(),
                 Box::new(RibValue::String("127.0.0.1:9000".to_string())),
             );
             map.insert(
                 "next_hop_rina_addr".to_string(),
-                Box::new(RibValue::String("1001".to_string())),
+                Box::new(RibValue::Integer(1001)),
             );
             map
         });
 
-        let (tx, mut rx) = mpsc::channel(1);
-        member_rib_handle
-            .send(RibMessage::Create {
-                name: route_name,
-                class: "route".to_string(),
-                value: route_value,
-                response: tx,
-            })
+        let rib = member_rib_arc.read().await;
+        rib.create(route_name, "static_route".to_string(), route_value)
             .await
             .unwrap();
-        rx.recv().await.unwrap().unwrap();
         println!("  ✓ Loaded route: 1001 → 127.0.0.1:9000");
     }
 

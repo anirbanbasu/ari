@@ -10,6 +10,7 @@ use crate::efcp::{Efcp, FlowConfig};
 use crate::pdu::Pdu;
 use crate::rib::{Rib, RibValue};
 use crate::rmt::{ForwardingEntry, Rmt};
+use crate::routing::RouteResolver;
 use crate::shim::UdpShim;
 use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc};
@@ -248,7 +249,7 @@ pub struct RmtActor {
     rmt: Arc<RwLock<Rmt>>,
     receiver: mpsc::Receiver<RmtMessage>,
     shim_handle: Option<ShimHandle>,
-    rib_handle: Option<RibHandle>,
+    route_resolver: Option<Arc<RouteResolver>>,
 }
 
 impl RmtActor {
@@ -257,7 +258,7 @@ impl RmtActor {
             rmt: Arc::new(RwLock::new(Rmt::new(local_addr))),
             receiver,
             shim_handle: None,
-            rib_handle: None,
+            route_resolver: None,
         }
     }
 
@@ -265,57 +266,18 @@ impl RmtActor {
         self.shim_handle = Some(handle);
     }
 
-    pub fn set_rib_handle(&mut self, handle: RibHandle) {
-        self.rib_handle = Some(handle);
+    pub fn set_route_resolver(&mut self, resolver: Arc<RouteResolver>) {
+        self.route_resolver = Some(resolver);
     }
 
     /// Populate forwarding table from RIB routes
+    ///
+    /// DEPRECATED: With RouteResolver, forwarding is done via next-hop resolution
+    /// rather than pre-populating a forwarding table. This method is kept for
+    /// backward compatibility but may be removed in future versions.
     pub async fn populate_forwarding_table(&self) {
-        if let Some(rib_handle) = &self.rib_handle {
-            // Get all routes from RIB
-            let (tx, mut rx) = mpsc::channel(1);
-            let _ = rib_handle
-                .send(RibMessage::ListByClass {
-                    class: "route".to_string(),
-                    response: tx,
-                })
-                .await;
-
-            if let Some(route_names) = rx.recv().await {
-                for route_name in route_names {
-                    // Read each route
-                    let (tx, mut rx) = mpsc::channel(1);
-                    let _ = rib_handle
-                        .send(RibMessage::Read {
-                            name: route_name.clone(),
-                            response: tx,
-                        })
-                        .await;
-
-                    if let Some(Some(route_value)) = rx.recv().await
-                        && let RibValue::Struct(fields) = route_value
-                    {
-                        // Extract destination and next_hop from route
-                        if let (Some(dest_box), Some(next_hop_box)) =
-                            (fields.get("destination"), fields.get("next_hop_rina_addr"))
-                            && let (RibValue::String(dest_str), RibValue::String(next_hop_str)) =
-                                (dest_box.as_ref(), next_hop_box.as_ref())
-                            && let (Ok(dst_addr), Ok(next_hop)) =
-                                (dest_str.parse::<u64>(), next_hop_str.parse::<u64>())
-                        {
-                            let entry = ForwardingEntry {
-                                dst_addr,
-                                next_hop,
-                                cost: 1,
-                            };
-                            let mut rmt = self.rmt.write().await;
-                            rmt.add_forwarding_entry(entry);
-                            println!("📋 Added forwarding entry: {} → {}", dst_addr, next_hop);
-                        }
-                    }
-                }
-            }
-        }
+        // No-op: RouteResolver handles route lookups dynamically
+        println!("⚠️  populate_forwarding_table() is deprecated - using RouteResolver instead");
     }
 
     pub async fn run(mut self) {
@@ -330,41 +292,40 @@ impl RmtActor {
                     let mut rmt = self.rmt.write().await;
                     let result = rmt.process_outgoing(pdu.clone());
 
-                    // If successful, send PDU via Shim
+                    // If successful, send PDU via Shim using RouteResolver
                     if let (Ok(_next_hop), Some(shim_handle)) = (&result, &self.shim_handle) {
-                        // Serialize and send PDU
+                        // Serialize PDU
                         if let Ok(pdu_bytes) = bincode::serialize(&pdu) {
-                            // Get the socket address for next_hop from RIB
-                            if let Some(rib_handle) = &self.rib_handle {
-                                let route_name = format!("/routing/static/{}", pdu.dst_addr);
-                                let (tx, mut rx) = mpsc::channel(1);
-                                let _ = rib_handle
-                                    .send(RibMessage::Read {
-                                        name: route_name,
-                                        response: tx,
-                                    })
-                                    .await;
+                            // Resolve next-hop socket address using RouteResolver
+                            if let Some(resolver) = &self.route_resolver {
+                                match resolver.resolve_next_hop(pdu.dst_addr).await {
+                                    Ok(socket_addr) => {
+                                        // Send PDU via Shim
+                                        let (tx, mut rx) = mpsc::channel(1);
+                                        let _ = shim_handle
+                                            .send(ShimMessage::Send {
+                                                data: pdu_bytes,
+                                                dest: socket_addr.to_string(),
+                                                response: tx,
+                                            })
+                                            .await;
 
-                                if let Some(Some(RibValue::Struct(fields))) = rx.recv().await
-                                    && let Some(socket_addr_box) = fields.get("next_hop_address")
-                                    && let RibValue::String(socket_addr) = socket_addr_box.as_ref()
-                                {
-                                    let (tx, mut rx) = mpsc::channel(1);
-                                    let _ = shim_handle
-                                        .send(ShimMessage::Send {
-                                            data: pdu_bytes,
-                                            dest: socket_addr.clone(),
-                                            response: tx,
-                                        })
-                                        .await;
-
-                                    if let Some(Ok(_)) = rx.recv().await {
-                                        println!(
-                                            "📤 Sent PDU to {} via {}",
-                                            pdu.dst_addr, socket_addr
+                                        if let Some(Ok(_)) = rx.recv().await {
+                                            println!(
+                                                "📤 Sent PDU to {} via {}",
+                                                pdu.dst_addr, socket_addr
+                                            );
+                                        }
+                                    }
+                                    Err(e) => {
+                                        eprintln!(
+                                            "❌ Failed to resolve route for {}: {}",
+                                            pdu.dst_addr, e
                                         );
                                     }
                                 }
+                            } else {
+                                eprintln!("❌ RouteResolver not initialized for RMT");
                             }
                         }
                     }

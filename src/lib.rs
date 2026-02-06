@@ -21,6 +21,7 @@ pub mod pdu;
 pub mod policies;
 pub mod rib;
 pub mod rmt;
+pub mod routing;
 pub mod shim;
 
 // Re-export commonly used types
@@ -48,6 +49,7 @@ pub use policies::{
 };
 pub use rib::{Rib, RibObject, RibValue};
 pub use rmt::{ForwardingEntry, Rmt};
+pub use routing::{RouteMetadata, RouteResolver, RouteResolverConfig, RouteSnapshot, RouteStats};
 pub use shim::{AddressMapper, UdpShim};
 
 /// Represents a Distributed IPC Facility (DIF).

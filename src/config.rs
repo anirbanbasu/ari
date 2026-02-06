@@ -200,6 +200,30 @@ pub struct RoutingConfig {
     /// Static routes (bootstrap only)
     #[serde(default)]
     pub static_routes: Vec<StaticRoute>,
+    /// Enable persistence of dynamic routes (save/load from snapshot file)
+    #[serde(default)]
+    pub enable_route_persistence: bool,
+    /// Path to dynamic route snapshot file (TOML format)
+    #[serde(default = "default_route_snapshot_path")]
+    pub route_snapshot_path: String,
+    /// Default TTL for dynamic routes in seconds (0 = never expires)
+    #[serde(default = "default_route_ttl_seconds")]
+    pub route_ttl_seconds: u64,
+    /// Interval between automatic snapshots in seconds (0 = disabled)
+    #[serde(default = "default_snapshot_interval_seconds")]
+    pub route_snapshot_interval_seconds: u64,
+}
+
+fn default_route_snapshot_path() -> String {
+    "dynamic-routes.toml".to_string()
+}
+
+fn default_route_ttl_seconds() -> u64 {
+    3600 // 1 hour
+}
+
+fn default_snapshot_interval_seconds() -> u64 {
+    300 // 5 minutes
 }
 
 /// Unified configuration after parsing CLI or file
@@ -217,6 +241,10 @@ pub struct IpcpConfiguration {
     pub enrollment_max_retries: u32,
     pub enrollment_initial_backoff_ms: u64,
     pub static_routes: Vec<StaticRoute>,
+    pub enable_route_persistence: bool,
+    pub route_snapshot_path: String,
+    pub route_ttl_seconds: u64,
+    pub route_snapshot_interval_seconds: u64,
 }
 
 impl IpcpConfiguration {
@@ -247,6 +275,10 @@ impl IpcpConfiguration {
                     enrollment_max_retries: default_max_retries(),
                     enrollment_initial_backoff_ms: default_initial_backoff_ms(),
                     static_routes: vec![],
+                    enable_route_persistence: false,
+                    route_snapshot_path: default_route_snapshot_path(),
+                    route_ttl_seconds: default_route_ttl_seconds(),
+                    route_snapshot_interval_seconds: default_snapshot_interval_seconds(),
                 })
             }
             IpcpMode::Bootstrap => {
@@ -272,6 +304,10 @@ impl IpcpConfiguration {
                     enrollment_max_retries: default_max_retries(),
                     enrollment_initial_backoff_ms: default_initial_backoff_ms(),
                     static_routes: vec![], // No CLI support for routes yet
+                    enable_route_persistence: false,
+                    route_snapshot_path: default_route_snapshot_path(),
+                    route_ttl_seconds: default_route_ttl_seconds(),
+                    route_snapshot_interval_seconds: default_snapshot_interval_seconds(),
                 })
             }
             IpcpMode::Member => {
@@ -297,6 +333,10 @@ impl IpcpConfiguration {
                     enrollment_max_retries: default_max_retries(),
                     enrollment_initial_backoff_ms: default_initial_backoff_ms(),
                     static_routes: vec![], // Members learn routes from bootstrap
+                    enable_route_persistence: false,
+                    route_snapshot_path: default_route_snapshot_path(),
+                    route_ttl_seconds: default_route_ttl_seconds(),
+                    route_snapshot_interval_seconds: default_snapshot_interval_seconds(),
                 })
             }
         }
@@ -332,6 +372,10 @@ impl IpcpConfiguration {
             enrollment_max_retries: config.enrollment.max_retries,
             enrollment_initial_backoff_ms: config.enrollment.initial_backoff_ms,
             static_routes: config.routing.static_routes,
+            enable_route_persistence: config.routing.enable_route_persistence,
+            route_snapshot_path: config.routing.route_snapshot_path,
+            route_ttl_seconds: config.routing.route_ttl_seconds,
+            route_snapshot_interval_seconds: config.routing.route_snapshot_interval_seconds,
         })
     }
 

@@ -4,14 +4,16 @@
 use ari::{
     Dif, Directory, EfcpActor, EfcpHandle, EfcpMessage, EnrollmentManager, FlowAllocator,
     FlowConfig, ForwardingEntry, IpcProcess, IpcpState, PriorityScheduling, Rib, RibActor,
-    RibHandle, RibMessage, RibValue, RmtActor, RmtHandle, RmtMessage, RoutingPolicy, ShimActor,
-    ShimHandle, ShimMessage, ShortestPathRouting, UdpShim,
+    RibHandle, RibMessage, RibValue, RmtActor, RmtHandle, RmtMessage, RouteResolver,
+    RouteResolverConfig, RoutingPolicy, ShimActor, ShimHandle, ShimMessage, ShortestPathRouting,
+    UdpShim,
     config::{CliArgs, IpcpConfiguration, IpcpMode},
 };
 use clap::Parser;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::mpsc;
+use tokio::sync::{RwLock, mpsc};
 
 #[tokio::main]
 async fn main() {
@@ -422,8 +424,83 @@ async fn run_bootstrap_mode(config: IpcpConfiguration) {
 
     let local_addr = config.address.expect("Bootstrap mode requires an address");
 
+    // Initialize RIB first with static routes
+    println!("✓ Initializing RIB and loading static routes...");
+    let rib = ari::rib::Rib::new();
+    rib.create(
+        "/dif/name".to_string(),
+        "dif_info".to_string(),
+        RibValue::String(config.dif_name.clone()),
+    )
+    .await
+    .unwrap();
+
+    // Load static routes into RIB
+    for route in &config.static_routes {
+        let route_name = format!("/routing/static/{}", route.destination);
+        let route_value = ari::rib::RibValue::Struct({
+            let mut map = std::collections::HashMap::new();
+            map.insert(
+                "next_hop_address".to_string(),
+                Box::new(ari::rib::RibValue::String(route.next_hop_address.clone())),
+            );
+            map.insert(
+                "next_hop_rina_addr".to_string(),
+                Box::new(ari::rib::RibValue::Integer(route.next_hop_rina_addr as i64)),
+            );
+            map
+        });
+
+        rib.create(route_name.clone(), "static_route".to_string(), route_value)
+            .await
+            .unwrap();
+
+        println!(
+            "  Route: {} → {} ({})",
+            route.destination, route.next_hop_address, route.next_hop_rina_addr
+        );
+    }
+    println!("  Loaded {} static routes\n", config.static_routes.len());
+
+    // Initialize RouteResolver
+    println!("✓ Initializing RouteResolver...");
+    let rib_arc = Arc::new(RwLock::new(rib));
+    let resolver_config = RouteResolverConfig {
+        enable_persistence: config.enable_route_persistence,
+        snapshot_path: PathBuf::from(&config.route_snapshot_path),
+        default_ttl_seconds: config.route_ttl_seconds,
+        snapshot_interval_seconds: config.route_snapshot_interval_seconds,
+    };
+    let route_resolver = Arc::new(RouteResolver::new(rib_arc.clone(), resolver_config));
+
+    // Load dynamic routes from snapshot
+    if config.enable_route_persistence {
+        match route_resolver.load_snapshot().await {
+            Ok(count) if count > 0 => {
+                println!("  Loaded {} dynamic routes from snapshot", count);
+            }
+            Ok(_) => {
+                println!("  No dynamic routes to load from snapshot");
+            }
+            Err(e) => {
+                eprintln!("  ⚠ Failed to load route snapshot: {}", e);
+            }
+        }
+    }
+
+    // Start snapshot task for periodic saves
+    if config.enable_route_persistence && config.route_snapshot_interval_seconds > 0 {
+        let resolver_clone = route_resolver.clone();
+        let _snapshot_task = resolver_clone.start_snapshot_task();
+        println!(
+            "  Snapshot task started (interval: {}s)",
+            config.route_snapshot_interval_seconds
+        );
+    }
+    println!();
+
     // Spawn actor tasks
-    println!("✓ Spawning RINA component actors...\n");
+    println!("✓ Spawning RINA component actors...");
 
     // RIB Actor
     let (rib_tx, rib_rx) = mpsc::channel(32);
@@ -453,18 +530,13 @@ async fn run_bootstrap_mode(config: IpcpConfiguration) {
     });
     println!("  → EFCP Actor spawned");
 
-    // Spawn RMT Actor with Shim and RIB handles
+    // Spawn RMT Actor with Shim and RouteResolver
     let shim_for_rmt = shim_handle.clone();
-    let rib_for_rmt = rib_handle.clone();
+    let resolver_for_rmt = route_resolver.clone();
     tokio::spawn(async move {
         let mut actor = RmtActor::new(local_addr, rmt_rx);
         actor.set_shim_handle(shim_for_rmt);
-        actor.set_rib_handle(rib_for_rmt);
-
-        // Populate forwarding table from RIB after routes are loaded
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-        actor.populate_forwarding_table().await;
-
+        actor.set_route_resolver(resolver_for_rmt);
         actor.run().await;
     });
     println!("  → RMT Actor spawned");
@@ -486,7 +558,7 @@ async fn run_bootstrap_mode(config: IpcpConfiguration) {
     println!("  DIF: {}", config.dif_name);
 
     // Initialize RIB with address pool
-    println!("\n✓ Initializing address pool...");
+    println!("✓ Initializing address pool...");
     for addr in config.address_pool_start..=config.address_pool_end {
         let (resp_tx, mut resp_rx) = mpsc::channel(1);
         rib_handle
@@ -501,48 +573,17 @@ async fn run_bootstrap_mode(config: IpcpConfiguration) {
         let _ = resp_rx.recv().await.unwrap();
     }
     println!(
-        "  Address pool: {}-{}",
+        "  Address pool: {}-{}\n",
         config.address_pool_start, config.address_pool_end
     );
 
     // Set up async enrollment manager
-    println!("\n✓ Setting up enrollment manager...");
-    let rib = Rib::new();
-    rib.create(
-        "/dif/name".to_string(),
-        "dif_info".to_string(),
-        RibValue::String(config.dif_name.clone()),
-    )
-    .await
-    .unwrap();
-
-    // Load static routes into RIB
-    println!("\n✓ Loading static routes into RIB...");
-    for route in &config.static_routes {
-        let route_name = format!("/routing/static/{}", route.destination);
-        let route_value = ari::rib::RibValue::Struct({
-            let mut map = std::collections::HashMap::new();
-            map.insert(
-                "next_hop_address".to_string(),
-                Box::new(ari::rib::RibValue::String(route.next_hop_address.clone())),
-            );
-            map.insert(
-                "next_hop_rina_addr".to_string(),
-                Box::new(ari::rib::RibValue::Integer(route.next_hop_rina_addr as i64)),
-            );
-            map
-        });
-
-        rib.create(route_name.clone(), "static_route".to_string(), route_value)
-            .await
-            .unwrap();
-
-        println!(
-            "  Route: {} → {} ({})",
-            route.destination, route.next_hop_address, route.next_hop_rina_addr
-        );
-    }
-    println!("  Loaded {} static routes", config.static_routes.len());
+    println!("✓ Setting up enrollment manager...");
+    // Clone the RIB for enrollment (we already created it earlier)
+    let rib_for_enrollment = {
+        let rib_lock = rib_arc.read().await;
+        rib_lock.clone()
+    };
 
     let shim = Arc::new(UdpShim::new(local_addr));
 
@@ -554,13 +595,14 @@ async fn run_bootstrap_mode(config: IpcpConfiguration) {
     println!("  Bound to: {}", config.bind_address);
 
     let mut enrollment_mgr = EnrollmentManager::new_bootstrap(
-        rib,
+        rib_for_enrollment,
         shim.clone(),
         local_addr,
         config.address_pool_start,
         config.address_pool_end,
     );
     enrollment_mgr.set_ipcp_name(config.name.clone());
+    enrollment_mgr.set_route_resolver(route_resolver.clone());
     println!(
         "  Enrollment manager ready (timeout: {}s, retries: {})",
         config.enrollment_timeout_secs, config.enrollment_max_retries
@@ -588,6 +630,16 @@ async fn run_bootstrap_mode(config: IpcpConfiguration) {
 /// Runs member IPCP mode
 async fn run_member_mode(config: IpcpConfiguration) {
     println!("=== RINA Member IPCP ===\n");
+
+    // Validate configuration: Route persistence is not applicable to members
+    if config.enable_route_persistence {
+        eprintln!("⚠️  WARNING: Route persistence is IGNORED in member mode!");
+        eprintln!("    Members learn routes dynamically from bootstrap during enrollment.");
+        eprintln!("    Only bootstrap IPCPs should enable route persistence.");
+        eprintln!(
+            "    Set enable_route_persistence=false in the member configuration to remove this warning.\n"
+        );
+    }
 
     // Member starts with address 0 (will request dynamic assignment during enrollment)
     let local_addr = config.address.unwrap_or(0);

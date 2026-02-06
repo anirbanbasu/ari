@@ -9,8 +9,11 @@
 //! - RIB synchronization
 //! - Route creation
 
+use ari::routing::{RouteResolver, RouteResolverConfig};
 use ari::{EnrollmentManager, ForwardingEntry, Rib, RibValue, Rmt, UdpShim};
+use std::path::PathBuf;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 use tokio::time::{Duration, sleep};
 
 #[tokio::test]
@@ -61,13 +64,27 @@ async fn test_phase3_dynamic_address_assignment() {
     let bootstrap_shim = Arc::new(UdpShim::new(bootstrap_addr));
     bootstrap_shim.bind(bootstrap_bind).unwrap();
 
-    let bootstrap_em = EnrollmentManager::new_bootstrap(
+    // Create RouteResolver for bootstrap
+    let bootstrap_rib_arc = Arc::new(RwLock::new(bootstrap_rib.clone()));
+    let bootstrap_resolver_config = RouteResolverConfig {
+        enable_persistence: false,
+        snapshot_path: PathBuf::from("test-phase3-bootstrap.toml"),
+        default_ttl_seconds: 3600,
+        snapshot_interval_seconds: 0,
+    };
+    let bootstrap_route_resolver = Arc::new(RouteResolver::new(
+        bootstrap_rib_arc.clone(),
+        bootstrap_resolver_config,
+    ));
+
+    let mut bootstrap_em = EnrollmentManager::new_bootstrap(
         bootstrap_rib.clone(),
         bootstrap_shim.clone(),
         bootstrap_addr,
         pool_start,
         pool_end,
     );
+    bootstrap_em.set_route_resolver(bootstrap_route_resolver.clone());
 
     println!("   ✓ Bootstrap IPCP ready");
     println!("     - Address: {}", bootstrap_addr);
