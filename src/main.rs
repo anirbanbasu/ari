@@ -553,13 +553,14 @@ async fn run_bootstrap_mode(config: IpcpConfiguration) {
     }
     println!("  Bound to: {}", config.bind_address);
 
-    let enrollment_config = ari::enrollment::EnrollmentConfig {
-        timeout: std::time::Duration::from_secs(config.enrollment_timeout_secs),
-        max_retries: config.enrollment_max_retries,
-        initial_backoff_ms: config.enrollment_initial_backoff_ms,
-    };
-    let enrollment_mgr =
-        EnrollmentManager::with_config(rib, shim.clone(), local_addr, enrollment_config);
+    let mut enrollment_mgr = EnrollmentManager::new_bootstrap(
+        rib,
+        shim.clone(),
+        local_addr,
+        config.address_pool_start,
+        config.address_pool_end,
+    );
+    enrollment_mgr.set_ipcp_name(config.name.clone());
     println!(
         "  Enrollment manager ready (timeout: {}s, retries: {})",
         config.enrollment_timeout_secs, config.enrollment_max_retries
@@ -588,8 +589,8 @@ async fn run_bootstrap_mode(config: IpcpConfiguration) {
 async fn run_member_mode(config: IpcpConfiguration) {
     println!("=== RINA Member IPCP ===\n");
 
-    // Member uses configured address (Phase 3 will implement dynamic assignment)
-    let local_addr = config.address.expect("Member mode requires a pre-configured address until Phase 3 dynamic assignment is implemented");
+    // Member starts with address 0 (will request dynamic assignment during enrollment)
+    let local_addr = config.address.unwrap_or(0);
 
     // Spawn actor tasks
     println!("✓ Spawning RINA component actors...\n");
@@ -637,7 +638,14 @@ async fn run_member_mode(config: IpcpConfiguration) {
 
     println!("✓ Created Member IPCP: {}", config.name);
     println!("  DIF: {}", config.dif_name);
-    println!("  Status: Enrolling (address pending)");
+    if local_addr == 0 {
+        println!("  Status: Enrolling (will request dynamic address)");
+    } else {
+        println!(
+            "  Status: Enrolling with pre-configured address: {}",
+            local_addr
+        );
+    }
 
     // Set up async enrollment manager
     println!("\n✓ Setting up enrollment manager...");
@@ -723,14 +731,24 @@ async fn run_member_mode(config: IpcpConfiguration) {
         .await
     {
         Ok(dif_name) => {
+            // Get the assigned address (may have been updated during enrollment)
+            let assigned_addr = enrollment_mgr.local_addr();
+            ipcp.address = Some(assigned_addr);
             ipcp.set_state(IpcpState::Operational);
+
             println!("\n🎉 Successfully enrolled in DIF: {}", dif_name);
+            if assigned_addr != local_addr {
+                println!("   Assigned RINA address: {}", assigned_addr);
+            }
             println!("   Member IPCP is now operational!\n");
 
             // Keep running
             loop {
                 tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
-                println!("  [Member IPCP operational in DIF: {}]", dif_name);
+                println!(
+                    "  [Member IPCP operational in DIF: {} with address: {}]",
+                    dif_name, assigned_addr
+                );
             }
         }
         Err(e) => {

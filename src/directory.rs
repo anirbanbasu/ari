@@ -170,3 +170,136 @@ mod tests {
         assert!(names.contains(&"app2".to_string()));
     }
 }
+
+/// Address pool for dynamic address assignment (used by bootstrap IPCP)
+#[derive(Debug, Clone)]
+pub struct AddressPool {
+    /// Range start (inclusive)
+    start: u64,
+    /// Range end (inclusive)
+    end: u64,
+    /// Currently assigned addresses
+    assigned: Arc<RwLock<std::collections::HashSet<u64>>>,
+}
+
+impl AddressPool {
+    /// Creates a new address pool with the given range
+    pub fn new(start: u64, end: u64) -> Self {
+        Self {
+            start,
+            end,
+            assigned: Arc::new(RwLock::new(std::collections::HashSet::new())),
+        }
+    }
+
+    /// Allocates the next available address
+    ///
+    /// # Returns
+    /// * `Ok(u64)` with the allocated address
+    /// * `Err(String)` if no addresses are available
+    pub fn allocate(&self) -> Result<u64, String> {
+        let mut assigned = self.assigned.write().unwrap();
+
+        // Find first available address
+        for addr in self.start..=self.end {
+            if !assigned.contains(&addr) {
+                assigned.insert(addr);
+                return Ok(addr);
+            }
+        }
+
+        Err("Address pool exhausted".to_string())
+    }
+
+    /// Releases an address back to the pool
+    pub fn release(&self, address: u64) -> Result<(), String> {
+        let mut assigned = self.assigned.write().unwrap();
+
+        if address < self.start || address > self.end {
+            return Err("Address out of pool range".to_string());
+        }
+
+        if !assigned.remove(&address) {
+            return Err("Address was not allocated".to_string());
+        }
+
+        Ok(())
+    }
+
+    /// Checks if an address is currently allocated
+    pub fn is_allocated(&self, address: u64) -> bool {
+        let assigned = self.assigned.read().unwrap();
+        assigned.contains(&address)
+    }
+
+    /// Returns the number of allocated addresses
+    pub fn allocated_count(&self) -> usize {
+        let assigned = self.assigned.read().unwrap();
+        assigned.len()
+    }
+
+    /// Returns the total capacity of the pool
+    pub fn capacity(&self) -> u64 {
+        self.end - self.start + 1
+    }
+
+    /// Returns available addresses count
+    pub fn available_count(&self) -> u64 {
+        self.capacity() - self.allocated_count() as u64
+    }
+}
+
+#[cfg(test)]
+mod address_pool_tests {
+    use super::*;
+
+    #[test]
+    fn test_address_pool_allocation() {
+        let pool = AddressPool::new(1000, 1005);
+
+        let addr1 = pool.allocate().unwrap();
+        let addr2 = pool.allocate().unwrap();
+
+        assert_ne!(addr1, addr2);
+        assert!(addr1 >= 1000 && addr1 <= 1005);
+        assert!(addr2 >= 1000 && addr2 <= 1005);
+    }
+
+    #[test]
+    fn test_address_pool_exhaustion() {
+        let pool = AddressPool::new(1000, 1002); // Only 3 addresses
+
+        let _addr1 = pool.allocate().unwrap();
+        let _addr2 = pool.allocate().unwrap();
+        let _addr3 = pool.allocate().unwrap();
+
+        // Fourth allocation should fail
+        assert!(pool.allocate().is_err());
+    }
+
+    #[test]
+    fn test_address_pool_release() {
+        let pool = AddressPool::new(1000, 1002);
+
+        let addr = pool.allocate().unwrap();
+        assert_eq!(pool.allocated_count(), 1);
+
+        pool.release(addr).unwrap();
+        assert_eq!(pool.allocated_count(), 0);
+
+        // Should be able to allocate again
+        let addr2 = pool.allocate().unwrap();
+        assert_eq!(addr, addr2);
+    }
+
+    #[test]
+    fn test_address_pool_capacity() {
+        let pool = AddressPool::new(1000, 1010);
+
+        assert_eq!(pool.capacity(), 11);
+        assert_eq!(pool.available_count(), 11);
+
+        pool.allocate().unwrap();
+        assert_eq!(pool.available_count(), 10);
+    }
+}

@@ -20,7 +20,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
 
 /// Represents an object stored in the RIB with metadata
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RibObject {
     /// Unique identifier for this object
     pub name: String,
@@ -218,29 +218,26 @@ impl Rib {
 
     /// Serializes the entire RIB into a byte vector for synchronization
     ///
+    /// Uses bincode for efficient binary serialization
+    ///
     /// # Returns
     /// A serialized representation of all RIB objects
     pub async fn serialize(&self) -> Vec<u8> {
         let objects = self.objects.read().await;
 
-        // Simple serialization: JSON format for human readability
-        // In production, you'd use a more efficient binary format
-        let serializable: Vec<_> = objects.values().cloned().collect();
+        // Collect all objects into a vector
+        let all_objects: Vec<RibObject> = objects.values().cloned().collect();
 
-        // Convert to JSON string then to bytes
-        format!(
-            "{{\"count\":{},\"objects\":[{}]}}",
-            serializable.len(),
-            serializable
-                .iter()
-                .map(|obj| self.serialize_object(obj))
-                .collect::<Vec<_>>()
-                .join(",")
-        )
-        .into_bytes()
+        // Serialize using bincode
+        bincode::serialize(&all_objects).unwrap_or_else(|e| {
+            eprintln!("Failed to serialize RIB: {}", e);
+            Vec::new()
+        })
     }
 
     /// Deserializes a RIB snapshot and merges it into this RIB
+    ///
+    /// Uses bincode for deserialization
     ///
     /// # Arguments
     /// * `data` - Serialized RIB data
@@ -253,11 +250,12 @@ impl Rib {
             return Ok(0);
         }
 
-        let json_str =
-            String::from_utf8(data.to_vec()).map_err(|e| format!("Invalid UTF-8: {}", e))?;
+        // Deserialize using bincode
+        let objects: Vec<RibObject> =
+            bincode::deserialize(data).map_err(|e| format!("Failed to deserialize RIB: {}", e))?;
 
-        // Simple JSON parsing - in production use a proper JSON library
-        let count = self.parse_and_merge_objects(&json_str)?;
+        // Merge objects into RIB
+        let count = self.merge_objects(objects).await;
         Ok(count)
     }
 
@@ -303,40 +301,6 @@ impl Rib {
         let mut counter = self.version_counter.write().await;
         *counter += 1;
         *counter
-    }
-
-    /// Helper: Serializes a single RIB object to JSON-like format
-    fn serialize_object(&self, obj: &RibObject) -> String {
-        let value_str = self.serialize_value(&obj.value);
-        format!(
-            "{{\"name\":\"{}\",\"class\":\"{}\",\"value\":{},\"version\":{},\"last_modified\":{}}}",
-            obj.name, obj.class, value_str, obj.version, obj.last_modified
-        )
-    }
-
-    /// Helper: Serializes a RibValue to JSON-like format
-    fn serialize_value(&self, value: &RibValue) -> String {
-        match value {
-            RibValue::String(s) => format!("{{\"type\":\"string\",\"data\":\"{}\"}}", s),
-            RibValue::Integer(i) => format!("{{\"type\":\"integer\",\"data\":{}}}", i),
-            RibValue::Boolean(b) => format!("{{\"type\":\"boolean\",\"data\":{}}}", b),
-            RibValue::Bytes(bytes) => {
-                // Simple hex encoding for bytes
-                let hex_str: String = bytes.iter().map(|b| format!("{:02x}", b)).collect();
-                format!("{{\"type\":\"bytes\",\"data\":\"{}\"}}", hex_str)
-            }
-            RibValue::Struct(_) => {
-                // Simplified struct serialization
-                "{\"type\":\"struct\",\"data\":\"...\"}".to_string()
-            }
-        }
-    }
-
-    /// Helper: Parses JSON and merges objects
-    fn parse_and_merge_objects(&self, _json: &str) -> Result<usize, String> {
-        // Simplified implementation - in production use serde_json
-        // For now, just acknowledge that data was received
-        Ok(0)
     }
 }
 

@@ -28,7 +28,7 @@ pub use actors::{
     RmtMessage, ShimActor, ShimHandle, ShimMessage,
 };
 pub use cdap::{CdapMessage, CdapOpCode, CdapSession};
-pub use directory::Directory;
+pub use directory::{AddressPool, Directory};
 pub use efcp::{Efcp, Flow, FlowConfig};
 pub use enrollment::{
     DifConfiguration, EnrollmentManager, EnrollmentRequest, EnrollmentResponse, EnrollmentState,
