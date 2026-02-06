@@ -1,4 +1,7 @@
 # ARI
+
+[![Rust tests](https://github.com/anirbanbasu/ari/actions/workflows/rust.yml/badge.svg)](https://github.com/anirbanbasu/ari/actions/workflows/rust.yml)
+
 ARI - _A RINA Implementation_ is a Rust implementation of the [Recursive Internetwork Architecture (RINA)](https://en.wikipedia.org/wiki/Recursive_Internetwork_Architecture).
 
 The acronym 'ARI' is intentionally chosen to reflect both an expanded 'A RINA Implementation' and imply the similarities between networking and ant colonies where the Japanese word for ant, [蟻](https://jisho.org/search/%E8%9F%BB) or mostly written as アリ, is pronounced as 'ari'.
