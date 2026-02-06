@@ -236,8 +236,9 @@ The design choices Gemini characterized as "shortcuts" or "weaknesses" are **int
 
 **Next Steps (Documented):**
 1. ✅ **RIB State Persistence**: Load/save RIB to disk for crash recovery (Completed 6 February 2026)
-2. ✅ **Incremental RIB Synchronization**: CDAP enhancements with change log (Completed 6 February 2026
-4. 📋 Multi-underlay support and peer discovery
-5. 📋 Security features (authentication, encryption)
+2. ✅ **Incremental RIB Synchronization**: CDAP enhancements with change log (Completed 6 February 2026)
+3. 📋 **Flow Allocator Abstraction**: Inter-IPCP flow allocation and N-1 layer abstraction
+4. 📋 **Multi-underlay support and peer discovery**: Multiple transport protocols and automatic peer discovery
+5. 📋 **Security features**: Authentication, encryption, and certificate validation
 
 The project is on track, well-documented, and has exceeded the basic implementation goals Gemini evaluated.

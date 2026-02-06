@@ -50,7 +50,7 @@ pub use policies::{
 pub use rib::{Rib, RibChange, RibChangeLog, RibObject, RibValue};
 pub use rmt::{ForwardingEntry, Rmt};
 pub use routing::{RouteMetadata, RouteResolver, RouteResolverConfig, RouteSnapshot, RouteStats};
-pub use shim::{AddressMapper, UdpShim};
+pub use shim::{AddressMapper, Shim, UdpShim};
 
 /// Represents a Distributed IPC Facility (DIF).
 ///

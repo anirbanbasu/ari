@@ -1,17 +1,47 @@
 // SPDX-License-Identifier: EUPL-1.2-or-later
 // Copyright © 2026-present ARI Contributors
 
-//! Shim Layer - UDP/IP abstraction
+//! Shim Layer - Underlay abstraction
 //!
-//! This module provides a shim layer that abstracts away the UDP/IP
-//! networking details, allowing RINA to operate over standard IP networks.
-//! It handles socket management, address translation, and packet I/O.
+//! This module provides a shim layer that abstracts away underlay
+//! networking details, allowing RINA to operate over different transport
+//! protocols. It handles socket management, address translation, and packet I/O.
+//!
+//! The `Shim` trait defines the interface that any underlay implementation must
+//! provide. Currently, only UDP/IP is implemented via `UdpShim`, but the trait
+//! allows for future implementations using TCP, QUIC, Unix sockets, etc.
 
 use crate::pdu::Pdu;
 use std::collections::HashMap;
 use std::net::{SocketAddr, UdpSocket};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+/// Shim layer trait - abstraction for underlay protocols
+///
+/// Defines the interface that any underlay implementation must provide.
+/// This allows RINA to work over different transport protocols (UDP, TCP, QUIC, etc.)
+/// without changes to higher-level components.
+pub trait Shim: Send + Sync {
+    /// Binds the shim to a network address
+    fn bind(&self, addr: &str) -> Result<(), ShimError>;
+
+    /// Sends a PDU to its destination
+    fn send_pdu(&self, pdu: &Pdu) -> Result<usize, ShimError>;
+
+    /// Receives a PDU from the network (non-blocking)
+    /// Returns the PDU and the source socket address it was received from
+    fn receive_pdu(&self) -> Result<Option<(Pdu, SocketAddr)>, ShimError>;
+
+    /// Registers a RINA address to socket address mapping
+    fn register_peer(&self, rina_addr: u64, socket_addr: SocketAddr);
+
+    /// Looks up socket address for a RINA address
+    fn lookup_peer(&self, rina_addr: u64) -> Option<SocketAddr>;
+
+    /// Returns the local RINA address
+    fn local_rina_addr(&self) -> u64;
+}
 
 /// Shim layer error types
 #[derive(Debug)]
@@ -203,6 +233,32 @@ impl UdpShim {
             }
             None => Ok(None),
         }
+    }
+}
+
+impl Shim for UdpShim {
+    fn bind(&self, addr: &str) -> Result<(), ShimError> {
+        self.bind(addr)
+    }
+
+    fn send_pdu(&self, pdu: &Pdu) -> Result<usize, ShimError> {
+        self.send_pdu(pdu)
+    }
+
+    fn receive_pdu(&self) -> Result<Option<(Pdu, SocketAddr)>, ShimError> {
+        self.receive_pdu()
+    }
+
+    fn register_peer(&self, rina_addr: u64, socket_addr: SocketAddr) {
+        self.register_peer(rina_addr, socket_addr)
+    }
+
+    fn lookup_peer(&self, rina_addr: u64) -> Option<SocketAddr> {
+        self.lookup_peer(rina_addr)
+    }
+
+    fn local_rina_addr(&self) -> u64 {
+        self.local_rina_addr()
     }
 }
 
