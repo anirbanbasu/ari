@@ -16,6 +16,7 @@ pub mod efcp;
 pub mod enrollment;
 pub mod error;
 pub mod fal;
+pub mod inter_ipcp_fal;
 pub mod ipcp;
 pub mod pdu;
 pub mod policies;
@@ -41,6 +42,7 @@ pub use error::{
     ShimError,
 };
 pub use fal::{AllocatedFlow, FlowAllocator, FlowState};
+pub use inter_ipcp_fal::{InterIpcpFlow, InterIpcpFlowAllocator, InterIpcpFlowState};
 pub use ipcp::{IpcProcess, IpcpState};
 pub use pdu::{Pdu, PduType, QoSParameters};
 pub use policies::{

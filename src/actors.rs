@@ -7,6 +7,7 @@
 //! allowing them to run concurrently and communicate via channels.
 
 use crate::efcp::{Efcp, FlowConfig};
+use crate::inter_ipcp_fal::InterIpcpFlowAllocator;
 use crate::pdu::Pdu;
 use crate::rib::{Rib, RibValue};
 use crate::rmt::{ForwardingEntry, Rmt};
@@ -248,7 +249,7 @@ pub enum RmtMessage {
 pub struct RmtActor {
     rmt: Arc<RwLock<Rmt>>,
     receiver: mpsc::Receiver<RmtMessage>,
-    shim_handle: Option<ShimHandle>,
+    flow_allocator: Option<Arc<InterIpcpFlowAllocator>>,
     route_resolver: Option<Arc<RouteResolver>>,
 }
 
@@ -257,13 +258,13 @@ impl RmtActor {
         Self {
             rmt: Arc::new(RwLock::new(Rmt::new(local_addr))),
             receiver,
-            shim_handle: None,
+            flow_allocator: None,
             route_resolver: None,
         }
     }
 
-    pub fn set_shim_handle(&mut self, handle: ShimHandle) {
-        self.shim_handle = Some(handle);
+    pub fn set_flow_allocator(&mut self, allocator: Arc<InterIpcpFlowAllocator>) {
+        self.flow_allocator = Some(allocator);
     }
 
     pub fn set_route_resolver(&mut self, resolver: Arc<RouteResolver>) {
@@ -292,41 +293,30 @@ impl RmtActor {
                     let mut rmt = self.rmt.write().await;
                     let result = rmt.process_outgoing(pdu.clone());
 
-                    // If successful, send PDU via Shim using RouteResolver
-                    if let (Ok(_next_hop), Some(shim_handle)) = (&result, &self.shim_handle) {
-                        // Serialize PDU
-                        if let Ok(pdu_bytes) = bincode::serialize(&pdu) {
-                            // Resolve next-hop socket address using RouteResolver
-                            if let Some(resolver) = &self.route_resolver {
-                                match resolver.resolve_next_hop(pdu.dst_addr).await {
-                                    Ok(socket_addr) => {
-                                        // Send PDU via Shim
-                                        let (tx, mut rx) = mpsc::channel(1);
-                                        let _ = shim_handle
-                                            .send(ShimMessage::Send {
-                                                data: pdu_bytes,
-                                                dest: socket_addr.to_string(),
-                                                response: tx,
-                                            })
-                                            .await;
-
-                                        if let Some(Ok(_)) = rx.recv().await {
-                                            println!(
-                                                "📤 Sent PDU to {} via {}",
-                                                pdu.dst_addr, socket_addr
-                                            );
-                                        }
-                                    }
-                                    Err(e) => {
-                                        eprintln!(
-                                            "❌ Failed to resolve route for {}: {}",
-                                            pdu.dst_addr, e
-                                        );
-                                    }
+                    if result.is_ok() {
+                        // Use flow allocator to send PDU
+                        if let Some(flow_allocator) = &self.flow_allocator {
+                            match flow_allocator.send_pdu(pdu.dst_addr, &pdu) {
+                                Ok(_) => {
+                                    println!(
+                                        "📤 Sent PDU to {} via InterIpcpFlowAllocator",
+                                        pdu.dst_addr
+                                    );
                                 }
-                            } else {
-                                eprintln!("❌ RouteResolver not initialized for RMT");
+                                Err(e) => {
+                                    eprintln!("❌ Failed to send PDU via flow allocator: {}", e);
+                                    let _ = response
+                                        .send(Err(format!("Flow allocator error: {}", e)))
+                                        .await;
+                                    continue;
+                                }
                             }
+                        } else {
+                            eprintln!("❌ InterIpcpFlowAllocator not initialized for RMT");
+                            let _ = response
+                                .send(Err("Flow allocator not initialized".to_string()))
+                                .await;
+                            continue;
                         }
                     }
 

@@ -5,8 +5,10 @@
 
 use ari::actors::*;
 use ari::efcp::FlowConfig;
+use ari::inter_ipcp_fal::InterIpcpFlowAllocator;
 use ari::rib::{Rib, RibValue};
 use ari::routing::{RouteResolver, RouteResolverConfig};
+use ari::shim::UdpShim;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -31,9 +33,6 @@ async fn test_flow_creation_and_data_transfer() {
 
     let (bootstrap_rmt_tx, bootstrap_rmt_rx) = mpsc::channel(32);
     let bootstrap_rmt_handle = RmtHandle::new(bootstrap_rmt_tx);
-
-    let (bootstrap_shim_tx, bootstrap_shim_rx) = mpsc::channel(32);
-    let bootstrap_shim_handle = ShimHandle::new(bootstrap_shim_tx);
 
     // Spawn bootstrap actors
     tokio::spawn(async move {
@@ -62,17 +61,27 @@ async fn test_flow_creation_and_data_transfer() {
         bootstrap_resolver_config,
     ));
 
-    let bootstrap_shim_for_rmt = bootstrap_shim_handle.clone();
+    // Create Shim and Flow Allocator for bootstrap
+    let bootstrap_shim = Arc::new(UdpShim::new(bootstrap_addr));
+    bootstrap_shim
+        .bind(bootstrap_bind)
+        .expect("Failed to bind bootstrap shim");
+
+    let bootstrap_rib_clone = {
+        let rib_lock = bootstrap_rib_arc.read().await;
+        rib_lock.clone()
+    };
+    let bootstrap_flow_allocator = Arc::new(InterIpcpFlowAllocator::new(
+        bootstrap_rib_clone,
+        bootstrap_shim.clone(),
+    ));
+
+    let bootstrap_fal_for_rmt = bootstrap_flow_allocator.clone();
     let bootstrap_resolver_for_rmt = bootstrap_route_resolver.clone();
     tokio::spawn(async move {
         let mut actor = RmtActor::new(bootstrap_addr, bootstrap_rmt_rx);
-        actor.set_shim_handle(bootstrap_shim_for_rmt);
+        actor.set_flow_allocator(bootstrap_fal_for_rmt);
         actor.set_route_resolver(bootstrap_resolver_for_rmt);
-        actor.run().await;
-    });
-
-    tokio::spawn(async move {
-        let actor = ShimActor::new(bootstrap_addr, bootstrap_shim_rx);
         actor.run().await;
     });
 
@@ -99,20 +108,6 @@ async fn test_flow_creation_and_data_transfer() {
         println!("  ✓ Loaded route: 1002 → 127.0.0.1:9001");
     }
 
-    // Bind bootstrap shim via ShimActor
-    {
-        let (tx, mut rx) = mpsc::channel(1);
-        bootstrap_shim_handle
-            .send(ShimMessage::Bind {
-                addr: bootstrap_bind.to_string(),
-                response: tx,
-            })
-            .await
-            .unwrap();
-        rx.recv().await.unwrap().unwrap();
-        println!("  ✓ Bound to {}", bootstrap_bind);
-    }
-
     println!("  ✓ Bootstrap IPCP ready\n");
 
     // === Setup Member IPCP (addr: 1002) ===
@@ -130,9 +125,6 @@ async fn test_flow_creation_and_data_transfer() {
 
     let (member_rmt_tx, member_rmt_rx) = mpsc::channel(32);
     let member_rmt_handle = RmtHandle::new(member_rmt_tx);
-
-    let (member_shim_tx, member_shim_rx) = mpsc::channel(32);
-    let member_shim_handle = ShimHandle::new(member_shim_tx);
 
     // Spawn member actors
     tokio::spawn(async move {
@@ -161,17 +153,27 @@ async fn test_flow_creation_and_data_transfer() {
         member_resolver_config,
     ));
 
-    let member_shim_for_rmt = member_shim_handle.clone();
+    // Create Shim and Flow Allocator for member
+    let member_shim = Arc::new(UdpShim::new(member_addr));
+    member_shim
+        .bind(member_bind)
+        .expect("Failed to bind member shim");
+
+    let member_rib_clone = {
+        let rib_lock = member_rib_arc.read().await;
+        rib_lock.clone()
+    };
+    let member_flow_allocator = Arc::new(InterIpcpFlowAllocator::new(
+        member_rib_clone,
+        member_shim.clone(),
+    ));
+
+    let member_fal_for_rmt = member_flow_allocator.clone();
     let member_resolver_for_rmt = member_route_resolver.clone();
     tokio::spawn(async move {
         let mut actor = RmtActor::new(member_addr, member_rmt_rx);
-        actor.set_shim_handle(member_shim_for_rmt);
+        actor.set_flow_allocator(member_fal_for_rmt);
         actor.set_route_resolver(member_resolver_for_rmt);
-        actor.run().await;
-    });
-
-    tokio::spawn(async move {
-        let actor = ShimActor::new(member_addr, member_shim_rx);
         actor.run().await;
     });
 
@@ -196,20 +198,6 @@ async fn test_flow_creation_and_data_transfer() {
             .await
             .unwrap();
         println!("  ✓ Loaded route: 1001 → 127.0.0.1:9000");
-    }
-
-    // Bind member shim via ShimActor
-    {
-        let (tx, mut rx) = mpsc::channel(1);
-        member_shim_handle
-            .send(ShimMessage::Bind {
-                addr: member_bind.to_string(),
-                response: tx,
-            })
-            .await
-            .unwrap();
-        rx.recv().await.unwrap().unwrap();
-        println!("  ✓ Bound to {}", member_bind);
     }
 
     println!("  ✓ Member IPCP ready\n");

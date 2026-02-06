@@ -3,8 +3,8 @@
 
 use ari::{
     Dif, Directory, EfcpActor, EfcpHandle, EfcpMessage, EnrollmentManager, FlowAllocator,
-    FlowConfig, ForwardingEntry, IpcProcess, IpcpState, PriorityScheduling, Rib, RibActor,
-    RibHandle, RibMessage, RibValue, RmtActor, RmtHandle, RmtMessage, RouteResolver,
+    FlowConfig, ForwardingEntry, InterIpcpFlowAllocator, IpcProcess, IpcpState, PriorityScheduling,
+    Rib, RibActor, RibHandle, RibMessage, RibValue, RmtActor, RmtHandle, RmtMessage, RouteResolver,
     RouteResolverConfig, RoutingPolicy, ShimActor, ShimHandle, ShimMessage, ShortestPathRouting,
     UdpShim,
     config::{CliArgs, IpcpConfiguration, IpcpMode},
@@ -535,6 +535,25 @@ async fn run_bootstrap_mode(config: IpcpConfiguration) {
     }
     println!();
 
+    // Initialize Shim and Flow Allocator BEFORE spawning actors
+    println!("✓ Initializing Shim and Flow Allocator...");
+    let shim = Arc::new(UdpShim::new(local_addr));
+
+    // Bind shim to UDP socket
+    if let Err(e) = shim.bind(&config.bind_address) {
+        eprintln!("  Failed to bind shim: {}", e);
+        return;
+    }
+    println!("  Bound to: {}", config.bind_address);
+
+    // Initialize InterIpcpFlowAllocator
+    let rib_for_fal = {
+        let rib_lock = rib_arc.read().await;
+        rib_lock.clone()
+    };
+    let flow_allocator = Arc::new(InterIpcpFlowAllocator::new(rib_for_fal, shim.clone()));
+    println!("  Flow allocator ready (stale timeout: 300s)\n");
+
     // Spawn actor tasks
     println!("✓ Spawning RINA component actors...");
 
@@ -554,9 +573,6 @@ async fn run_bootstrap_mode(config: IpcpConfiguration) {
     let (rmt_tx, rmt_rx) = mpsc::channel(32);
     let rmt_handle = RmtHandle::new(rmt_tx);
 
-    let (shim_tx, shim_rx) = mpsc::channel(32);
-    let shim_handle = ShimHandle::new(shim_tx);
-
     // Spawn EFCP Actor with RMT handle
     let rmt_for_efcp = rmt_handle.clone();
     tokio::spawn(async move {
@@ -566,23 +582,16 @@ async fn run_bootstrap_mode(config: IpcpConfiguration) {
     });
     println!("  → EFCP Actor spawned");
 
-    // Spawn RMT Actor with Shim and RouteResolver
-    let shim_for_rmt = shim_handle.clone();
+    // Spawn RMT Actor with FlowAllocator and RouteResolver
+    let fal_for_rmt = flow_allocator.clone();
     let resolver_for_rmt = route_resolver.clone();
     tokio::spawn(async move {
         let mut actor = RmtActor::new(local_addr, rmt_rx);
-        actor.set_shim_handle(shim_for_rmt);
+        actor.set_flow_allocator(fal_for_rmt);
         actor.set_route_resolver(resolver_for_rmt);
         actor.run().await;
     });
-    println!("  → RMT Actor spawned");
-
-    // Spawn Shim Actor
-    tokio::spawn(async move {
-        let actor = ShimActor::new(local_addr, shim_rx);
-        actor.run().await;
-    });
-    println!("  → Shim Actor spawned\n");
+    println!("  → RMT Actor spawned\n");
 
     // Create IPCP
     let mut ipcp = IpcProcess::with_name_and_address(config.name.clone(), local_addr);
@@ -620,15 +629,6 @@ async fn run_bootstrap_mode(config: IpcpConfiguration) {
         let rib_lock = rib_arc.read().await;
         rib_lock.clone()
     };
-
-    let shim = Arc::new(UdpShim::new(local_addr));
-
-    // Bind shim to UDP socket
-    if let Err(e) = shim.bind(&config.bind_address) {
-        eprintln!("  Failed to bind shim: {}", e);
-        return;
-    }
-    println!("  Bound to: {}", config.bind_address);
 
     let mut enrollment_mgr = EnrollmentManager::new_bootstrap(
         rib_for_enrollment,
@@ -680,6 +680,37 @@ async fn run_member_mode(config: IpcpConfiguration) {
     // Member starts with address 0 (will request dynamic assignment during enrollment)
     let local_addr = config.address.unwrap_or(0);
 
+    // Initialize RIB for member IPCP
+    println!("✓ Initializing RIB...");
+    let rib = ari::rib::Rib::new();
+    rib.create(
+        "/dif/name".to_string(),
+        "dif_info".to_string(),
+        RibValue::String(config.dif_name.clone()),
+    )
+    .await
+    .unwrap();
+    let rib_arc = Arc::new(RwLock::new(rib));
+
+    // Initialize Shim and Flow Allocator
+    println!("✓ Initializing Shim and Flow Allocator...");
+    let shim = Arc::new(UdpShim::new(local_addr));
+
+    // Bind shim to UDP socket
+    if let Err(e) = shim.bind(&config.bind_address) {
+        eprintln!("  Failed to bind shim: {}", e);
+        return;
+    }
+    println!("  Bound to: {}", config.bind_address);
+
+    // Initialize InterIpcpFlowAllocator
+    let rib_for_fal = {
+        let rib_lock = rib_arc.read().await;
+        rib_lock.clone()
+    };
+    let flow_allocator = Arc::new(InterIpcpFlowAllocator::new(rib_for_fal, shim.clone()));
+    println!("  Flow allocator ready\n");
+
     // Spawn actor tasks
     println!("✓ Spawning RINA component actors...\n");
 
@@ -701,23 +732,16 @@ async fn run_member_mode(config: IpcpConfiguration) {
     });
     println!("  → EFCP Actor spawned");
 
-    // RMT Actor (will be updated with real address after enrollment)
+    // RMT Actor with FlowAllocator
     let (rmt_tx, rmt_rx) = mpsc::channel(32);
     let _rmt_handle = RmtHandle::new(rmt_tx);
+    let fal_for_rmt = flow_allocator.clone();
     tokio::spawn(async move {
-        let actor = RmtActor::new(local_addr, rmt_rx);
+        let mut actor = RmtActor::new(local_addr, rmt_rx);
+        actor.set_flow_allocator(fal_for_rmt);
         actor.run().await;
     });
-    println!("  → RMT Actor spawned");
-
-    // Shim Actor
-    let (shim_tx, shim_rx) = mpsc::channel(32);
-    let _shim_handle = ShimHandle::new(shim_tx);
-    tokio::spawn(async move {
-        let actor = ShimActor::new(local_addr, shim_rx);
-        actor.run().await;
-    });
-    println!("  → Shim Actor spawned\n");
+    println!("  → RMT Actor spawned\n");
 
     // Create IPCP
     let mut ipcp = IpcProcess::with_name_and_address(config.name.clone(), local_addr);
@@ -795,14 +819,7 @@ async fn run_member_mode(config: IpcpConfiguration) {
             None
         };
 
-    let shim = Arc::new(UdpShim::new(local_addr));
-
-    // Bind shim to UDP socket
-    if let Err(e) = shim.bind(&config.bind_address) {
-        eprintln!("  Failed to bind shim: {}", e);
-        return;
-    }
-    println!("  Bound to: {}", config.bind_address);
+    // Reuse the shim that was already created and bound earlier (no need to bind again)
 
     let enrollment_config = ari::enrollment::EnrollmentConfig {
         timeout: std::time::Duration::from_secs(config.enrollment_timeout_secs),
