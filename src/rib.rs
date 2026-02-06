@@ -417,4 +417,244 @@ mod tests {
 
         assert!(result.is_err());
     }
+
+    #[tokio::test]
+    async fn test_rib_serialization_roundtrip() {
+        let rib = Rib::new();
+
+        // Add various types of objects
+        rib.create(
+            "string-obj".to_string(),
+            "test".to_string(),
+            RibValue::String("hello world".to_string()),
+        )
+        .await
+        .unwrap();
+
+        rib.create(
+            "int-obj".to_string(),
+            "test".to_string(),
+            RibValue::Integer(42),
+        )
+        .await
+        .unwrap();
+
+        rib.create(
+            "bool-obj".to_string(),
+            "test".to_string(),
+            RibValue::Boolean(true),
+        )
+        .await
+        .unwrap();
+
+        rib.create(
+            "bytes-obj".to_string(),
+            "test".to_string(),
+            RibValue::Bytes(vec![1, 2, 3, 4, 5]),
+        )
+        .await
+        .unwrap();
+
+        // Create a nested struct
+        let mut struct_map = HashMap::new();
+        struct_map.insert(
+            "field1".to_string(),
+            Box::new(RibValue::String("value1".to_string())),
+        );
+        struct_map.insert("field2".to_string(), Box::new(RibValue::Integer(100)));
+
+        rib.create(
+            "struct-obj".to_string(),
+            "complex".to_string(),
+            RibValue::Struct(struct_map),
+        )
+        .await
+        .unwrap();
+
+        // Serialize the RIB
+        let serialized = rib.serialize().await;
+        assert!(!serialized.is_empty());
+
+        // Create a new RIB and deserialize
+        let rib2 = Rib::new();
+        let count = rib2.deserialize(&serialized).await.unwrap();
+        assert_eq!(count, 5);
+
+        // Verify all objects match
+        let obj1 = rib2.read("string-obj").await.unwrap();
+        assert_eq!(obj1.value.as_string(), Some("hello world"));
+        assert_eq!(obj1.class, "test");
+
+        let obj2 = rib2.read("int-obj").await.unwrap();
+        assert_eq!(obj2.value.as_integer(), Some(42));
+
+        let obj3 = rib2.read("bool-obj").await.unwrap();
+        assert_eq!(obj3.value.as_boolean(), Some(true));
+
+        let obj4 = rib2.read("bytes-obj").await.unwrap();
+        if let RibValue::Bytes(b) = &obj4.value {
+            assert_eq!(b, &vec![1, 2, 3, 4, 5]);
+        } else {
+            panic!("Expected Bytes value");
+        }
+
+        let obj5 = rib2.read("struct-obj").await.unwrap();
+        assert_eq!(obj5.class, "complex");
+    }
+
+    #[tokio::test]
+    async fn test_rib_empty_serialization() {
+        let rib = Rib::new();
+
+        // Serialize empty RIB
+        let serialized = rib.serialize().await;
+        assert!(!serialized.is_empty());
+
+        // Deserialize into another RIB
+        let rib2 = Rib::new();
+        let count = rib2.deserialize(&serialized).await.unwrap();
+        assert_eq!(count, 0);
+        assert_eq!(rib2.count().await, 0);
+    }
+
+    #[tokio::test]
+    async fn test_rib_deserialize_empty_data() {
+        let rib = Rib::new();
+
+        // Deserializing empty data should succeed with 0 count
+        let count = rib.deserialize(&[]).await.unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn test_rib_version_preservation() {
+        let rib = Rib::new();
+
+        // Create objects
+        rib.create("obj1".to_string(), "test".to_string(), RibValue::Integer(1))
+            .await
+            .unwrap();
+
+        // Get original version
+        let original = rib.read("obj1").await.unwrap();
+        let original_version = original.version;
+        let original_modified = original.last_modified;
+
+        // Serialize and deserialize
+        let serialized = rib.serialize().await;
+        let rib2 = Rib::new();
+        rib2.deserialize(&serialized).await.unwrap();
+
+        // Verify version and timestamp preserved
+        let restored = rib2.read("obj1").await.unwrap();
+        assert_eq!(restored.version, original_version);
+        assert_eq!(restored.last_modified, original_modified);
+    }
+
+    #[tokio::test]
+    async fn test_rib_merge_version_conflict() {
+        let rib = Rib::new();
+
+        // Create an object with version 1
+        rib.create(
+            "obj1".to_string(),
+            "test".to_string(),
+            RibValue::Integer(100),
+        )
+        .await
+        .unwrap();
+
+        let obj_v1 = rib.read("obj1").await.unwrap();
+        assert_eq!(obj_v1.version, 1);
+
+        // Update to create version 2
+        rib.update("obj1", RibValue::Integer(200)).await.unwrap();
+        let obj_v2 = rib.read("obj1").await.unwrap();
+        assert_eq!(obj_v2.version, 2);
+        assert_eq!(obj_v2.value.as_integer(), Some(200));
+
+        // Create another RIB with the old version
+        let rib2 = Rib::new();
+        rib2.deserialize(&bincode::serialize(&vec![obj_v1]).unwrap())
+            .await
+            .unwrap();
+
+        // Merge the newer version into rib2
+        let merged = rib2.merge_objects(vec![obj_v2.clone()]).await;
+        assert_eq!(merged, 1);
+
+        // Verify the newer version won
+        let result = rib2.read("obj1").await.unwrap();
+        assert_eq!(result.version, 2);
+        assert_eq!(result.value.as_integer(), Some(200));
+    }
+
+    #[tokio::test]
+    async fn test_rib_merge_ignore_older_version() {
+        let rib = Rib::new();
+
+        // Create object with version 2
+        rib.create(
+            "obj1".to_string(),
+            "test".to_string(),
+            RibValue::Integer(200),
+        )
+        .await
+        .unwrap();
+        rib.update("obj1", RibValue::Integer(200)).await.unwrap();
+
+        let obj_v2 = rib.read("obj1").await.unwrap();
+        assert_eq!(obj_v2.version, 2);
+
+        // Try to merge an older version
+        let mut old_obj = obj_v2.clone();
+        old_obj.version = 1;
+        old_obj.value = RibValue::Integer(100);
+
+        let merged = rib.merge_objects(vec![old_obj]).await;
+        assert_eq!(merged, 0); // Should not merge older version
+
+        // Verify original version unchanged
+        let result = rib.read("obj1").await.unwrap();
+        assert_eq!(result.version, 2);
+        assert_eq!(result.value.as_integer(), Some(200));
+    }
+
+    #[tokio::test]
+    async fn test_rib_get_all_objects() {
+        let rib = Rib::new();
+
+        // Add multiple objects
+        rib.create(
+            "obj1".to_string(),
+            "type-a".to_string(),
+            RibValue::Integer(1),
+        )
+        .await
+        .unwrap();
+        rib.create(
+            "obj2".to_string(),
+            "type-b".to_string(),
+            RibValue::Integer(2),
+        )
+        .await
+        .unwrap();
+        rib.create(
+            "obj3".to_string(),
+            "type-a".to_string(),
+            RibValue::Integer(3),
+        )
+        .await
+        .unwrap();
+
+        // Get all objects
+        let all_objects = rib.get_all_objects().await;
+        assert_eq!(all_objects.len(), 3);
+
+        // Verify all names present
+        let names: Vec<String> = all_objects.iter().map(|o| o.name.clone()).collect();
+        assert!(names.contains(&"obj1".to_string()));
+        assert!(names.contains(&"obj2".to_string()));
+        assert!(names.contains(&"obj3".to_string()));
+    }
 }
