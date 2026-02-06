@@ -143,6 +143,8 @@ pub struct EnrollmentManager {
     re_enrollment_in_progress: Arc<RwLock<bool>>,
     /// Route resolver for managing dynamic routes
     route_resolver: Option<Arc<RouteResolver>>,
+    /// Last synced RIB version (for incremental sync)
+    last_synced_version: Arc<RwLock<u64>>,
 }
 
 impl EnrollmentManager {
@@ -170,6 +172,7 @@ impl EnrollmentManager {
             last_heartbeat: Arc::new(RwLock::new(None)),
             re_enrollment_in_progress: Arc::new(RwLock::new(false)),
             route_resolver: None,
+            last_synced_version: Arc::new(RwLock::new(0)),
         }
     }
 
@@ -193,6 +196,7 @@ impl EnrollmentManager {
             last_heartbeat: Arc::new(RwLock::new(Some(Instant::now()))),
             re_enrollment_in_progress: Arc::new(RwLock::new(false)),
             route_resolver: None,
+            last_synced_version: Arc::new(RwLock::new(0)),
         }
     }
 
@@ -292,6 +296,8 @@ impl EnrollmentManager {
             invoke_id: 1,
             result: 0,
             result_reason: None,
+            sync_request: None,
+            sync_response: None,
         };
 
         // Serialize CDAP message with bincode
@@ -375,7 +381,14 @@ impl EnrollmentManager {
         if let Some(rib_data) = enroll_response.rib_snapshot {
             println!("Synchronizing RIB...");
             match self.rib.deserialize(&rib_data).await {
-                Ok(count) => println!("Synchronized {} RIB objects", count),
+                Ok(count) => {
+                    println!("Synchronized {} RIB objects", count);
+                    // Store RIB version for future incremental syncs
+                    let rib_version = self.rib.current_version().await;
+                    let mut last_version = self.last_synced_version.write().await;
+                    *last_version = rib_version;
+                    println!("  RIB version: {}", rib_version);
+                }
                 Err(e) => println!("Warning: Failed to sync RIB: {}", e),
             }
         }
@@ -413,6 +426,8 @@ impl EnrollmentManager {
             invoke_id: 2,
             result: 0,
             result_reason: None,
+            sync_request: None,
+            sync_response: None,
         };
 
         let cdap_bytes = bincode::serialize(&cdap_msg)
@@ -502,6 +517,138 @@ impl EnrollmentManager {
         Err(EnrollmentError::ReceiveFailed(
             "No response received".to_string(),
         ))
+    }
+
+    /// Start periodic RIB synchronization task (for members)
+    ///
+    /// Returns a join handle for the background task
+    pub fn start_sync_task(
+        self: Arc<Self>,
+        sync_interval_secs: u64,
+    ) -> tokio::task::JoinHandle<()> {
+        tokio::spawn(async move {
+            let mut interval =
+                tokio::time::interval(tokio::time::Duration::from_secs(sync_interval_secs));
+
+            // Skip first tick (immediate)
+            interval.tick().await;
+
+            loop {
+                interval.tick().await;
+
+                if let Err(e) = self.sync_rib().await {
+                    eprintln!("⚠️  RIB sync failed: {}", e);
+                } else {
+                    println!("✓ RIB sync completed");
+                }
+            }
+        })
+    }
+
+    /// Request incremental RIB synchronization from bootstrap
+    async fn sync_rib(&self) -> Result<(), EnrollmentError> {
+        let bootstrap_addr = self.bootstrap_addr.ok_or(EnrollmentError::NotEnrolled)?;
+
+        let last_version = *self.last_synced_version.read().await;
+
+        // Create CDAP message with sync request
+        let cdap_msg = CdapMessage::new_sync_request(
+            1, // invoke_id
+            last_version,
+            self.ipcp_name.clone().unwrap_or_default(),
+        );
+
+        // Serialize and send
+        let cdap_bytes = bincode::serialize(&cdap_msg)
+            .map_err(|e| EnrollmentError::SerializationFailed(e.to_string()))?;
+
+        let pdu = Pdu::new_data(
+            self.local_addr,
+            bootstrap_addr,
+            0, // flow_id
+            0, // seq_num
+            0, // flags
+            cdap_bytes,
+        );
+
+        self.shim
+            .send_pdu(&pdu)
+            .map_err(|e| EnrollmentError::SendFailed(e.to_string()))?;
+
+        // Wait for sync response
+        let response_pdu = self.receive_sync_response().await?;
+
+        // Deserialize CDAP response
+        let cdap_response: CdapMessage = bincode::deserialize(&response_pdu.payload)
+            .map_err(|e| EnrollmentError::DeserializationFailed(e.to_string()))?;
+
+        // Process sync response
+        if let Some(sync_resp) = cdap_response.sync_response {
+            if let Some(error) = sync_resp.error {
+                return Err(EnrollmentError::RibSyncFailed(error));
+            }
+
+            if let Some(changes) = sync_resp.changes {
+                // Incremental sync
+                let applied = self
+                    .rib
+                    .apply_changes(changes)
+                    .await
+                    .map_err(EnrollmentError::RibSyncFailed)?;
+
+                println!("  ✓ Applied {} incremental changes", applied);
+
+                // Update last synced version
+                let mut last_version = self.last_synced_version.write().await;
+                *last_version = sync_resp.current_version;
+            } else if let Some(snapshot) = sync_resp.full_snapshot {
+                // Full sync required (change log too old)
+                let synced = self
+                    .rib
+                    .deserialize(&snapshot)
+                    .await
+                    .map_err(EnrollmentError::RibSyncFailed)?;
+
+                println!("  ✓ Full sync: {} objects", synced);
+
+                // Update last synced version
+                let mut last_version = self.last_synced_version.write().await;
+                *last_version = sync_resp.current_version;
+            } else {
+                // No changes
+                println!("  ✓ RIB up to date (version {})", last_version);
+            }
+
+            Ok(())
+        } else {
+            Err(EnrollmentError::InvalidResponse(
+                "Missing sync response".to_string(),
+            ))
+        }
+    }
+
+    /// Wait for sync response from bootstrap
+    async fn receive_sync_response(&self) -> Result<Pdu, EnrollmentError> {
+        let poll_interval = Duration::from_millis(50);
+        let max_wait = Duration::from_secs(5);
+        let start = Instant::now();
+
+        loop {
+            if start.elapsed() > max_wait {
+                return Err(EnrollmentError::Timeout { attempts: 1 });
+            }
+
+            if let Ok(Some((pdu, _src_addr))) = self.shim.receive_pdu() {
+                // Check if it's a sync response (contains sync_response field)
+                if let Ok(cdap_msg) = bincode::deserialize::<CdapMessage>(&pdu.payload)
+                    && cdap_msg.sync_response.is_some()
+                {
+                    return Ok(pdu);
+                }
+            }
+
+            sleep(poll_interval).await;
+        }
     }
 
     /// Handle incoming enrollment request (bootstrap side)
@@ -684,6 +831,8 @@ impl EnrollmentManager {
             invoke_id: request_cdap.invoke_id,
             result: if response.accepted { 0 } else { 1 },
             result_reason: response.error.clone(),
+            sync_request: None,
+            sync_response: None,
         };
 
         // Serialize CDAP response
@@ -728,6 +877,8 @@ impl EnrollmentManager {
             (CdapOpCode::Read, _) if cdap_msg.obj_name.starts_with("/routing/") => {
                 self.handle_routing_read_request(pdu, &cdap_msg).await
             }
+            // RIB sync request
+            _ if cdap_msg.sync_request.is_some() => self.handle_sync_request(pdu, &cdap_msg).await,
             // Unknown/unhandled message type
             _ => {
                 // Silently ignore other message types for now
@@ -752,12 +903,95 @@ impl EnrollmentManager {
             invoke_id: request.invoke_id,
             result: 0,
             result_reason: None,
+            sync_request: None,
+            sync_response: None,
         };
 
         let response_bytes = bincode::serialize(&response)
             .map_err(|e| EnrollmentError::SerializationFailed(e.to_string()))?;
 
         let response_pdu = Pdu::new_data(self.local_addr, pdu.src_addr, 0, 0, 0, response_bytes);
+
+        self.shim
+            .send_pdu(&response_pdu)
+            .map_err(|e| EnrollmentError::SendFailed(e.to_string()))?;
+
+        Ok(())
+    }
+
+    /// Handle RIB sync request from member (bootstrap side)
+    async fn handle_sync_request(
+        &self,
+        pdu: &Pdu,
+        request: &CdapMessage,
+    ) -> Result<(), EnrollmentError> {
+        let sync_req = request
+            .sync_request
+            .as_ref()
+            .ok_or(EnrollmentError::InvalidResponse(
+                "Missing sync_request".to_string(),
+            ))?;
+
+        println!(
+            "📥 RIB sync request from {} (version {})",
+            sync_req.requester, sync_req.last_known_version
+        );
+
+        // Get current RIB version
+        let current_version = self.rib.current_version().await;
+
+        // Try to get incremental changes
+        let changes = self
+            .rib
+            .get_changes_since(sync_req.last_known_version)
+            .await;
+
+        let response = if let Ok(changes_vec) = changes {
+            // Member's version is within change log window - send incremental
+            println!(
+                "  ✓ Sending {} incremental changes (version {} → {})",
+                changes_vec.len(),
+                sync_req.last_known_version,
+                current_version
+            );
+
+            CdapMessage::new_sync_response(
+                request.invoke_id,
+                current_version,
+                Some(changes_vec),
+                None,
+                None,
+            )
+        } else {
+            // Member's version too old - send full snapshot
+            println!(
+                "  ⚠️  Version {} too old, sending full snapshot (current: {})",
+                sync_req.last_known_version, current_version
+            );
+
+            let snapshot = self.rib.serialize().await;
+
+            CdapMessage::new_sync_response(
+                request.invoke_id,
+                current_version,
+                None,
+                Some(snapshot),
+                None,
+            )
+        };
+
+        // Serialize and send response
+        let response_bytes = bincode::serialize(&response)
+            .map_err(|e| EnrollmentError::SerializationFailed(e.to_string()))?;
+
+        let response_pdu = Pdu::new_data(
+            self.local_addr,
+            pdu.src_addr,
+            0, // flow_id
+            0, // seq_num
+            0, // flags
+            response_bytes,
+        );
 
         self.shim
             .send_pdu(&response_pdu)

@@ -14,7 +14,7 @@
 //! The RIB is distributed across all IPCPs in a DIF and kept consistent through CDAP.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
@@ -70,6 +70,160 @@ impl RibValue {
     }
 }
 
+/// Represents a single change to the RIB for incremental synchronization
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum RibChange {
+    /// An object was created
+    Created(RibObject),
+    /// An object was updated
+    Updated(RibObject),
+    /// An object was deleted
+    Deleted {
+        name: String,
+        version: u64,
+        timestamp: u64,
+    },
+}
+
+impl RibChange {
+    /// Get the version number of this change
+    pub fn version(&self) -> u64 {
+        match self {
+            RibChange::Created(obj) => obj.version,
+            RibChange::Updated(obj) => obj.version,
+            RibChange::Deleted { version, .. } => *version,
+        }
+    }
+
+    /// Get the object name affected by this change
+    pub fn object_name(&self) -> &str {
+        match self {
+            RibChange::Created(obj) => &obj.name,
+            RibChange::Updated(obj) => &obj.name,
+            RibChange::Deleted { name, .. } => name,
+        }
+    }
+}
+
+/// Change log for incremental RIB synchronization
+///
+/// Maintains a bounded circular buffer of recent RIB changes to enable
+/// efficient delta-based synchronization between IPCPs.
+#[derive(Debug, Clone)]
+pub struct RibChangeLog {
+    /// Ordered list of changes (bounded by max_size)
+    changes: Arc<RwLock<VecDeque<RibChange>>>,
+    /// Maximum number of changes to retain
+    max_size: usize,
+    /// Oldest version available in change log
+    oldest_version: Arc<RwLock<u64>>,
+}
+
+impl RibChangeLog {
+    /// Creates a new change log with the specified maximum size
+    pub fn new(max_size: usize) -> Self {
+        Self {
+            changes: Arc::new(RwLock::new(VecDeque::with_capacity(max_size))),
+            max_size,
+            oldest_version: Arc::new(RwLock::new(0)),
+        }
+    }
+
+    /// Add a change to the log
+    ///
+    /// If at capacity, removes the oldest change and updates oldest_version
+    pub async fn log_change(&self, change: RibChange) {
+        let mut changes = self.changes.write().await;
+
+        // Remove oldest if at capacity
+        if changes.len() >= self.max_size
+            && let Some(removed) = changes.pop_front()
+        {
+            let version = removed.version();
+            let mut oldest = self.oldest_version.write().await;
+            *oldest = version + 1;
+        }
+
+        changes.push_back(change);
+    }
+
+    /// Get all changes since a specific version
+    ///
+    /// # Returns
+    /// * `Ok(Vec<RibChange>)` - Changes since the requested version
+    /// * `Err(String)` - If requested version is too old (needs full sync)
+    pub async fn get_changes_since(&self, since_version: u64) -> Result<Vec<RibChange>, String> {
+        let oldest = *self.oldest_version.read().await;
+
+        // Check if requested version is too old
+        if since_version < oldest {
+            return Err(format!(
+                "Requested version {} is too old. Oldest available: {}. Full sync required.",
+                since_version, oldest
+            ));
+        }
+
+        let changes = self.changes.read().await;
+        Ok(changes
+            .iter()
+            .filter(|change| change.version() > since_version)
+            .cloned()
+            .collect())
+    }
+
+    /// Get the current version (latest change)
+    pub async fn current_version(&self) -> u64 {
+        let changes = self.changes.read().await;
+        changes.back().map(|change| change.version()).unwrap_or(0)
+    }
+
+    /// Get the number of changes currently in the log
+    pub async fn len(&self) -> usize {
+        let changes = self.changes.read().await;
+        changes.len()
+    }
+
+    /// Check if the change log is empty
+    pub async fn is_empty(&self) -> bool {
+        let changes = self.changes.read().await;
+        changes.is_empty()
+    }
+    /// Update version tracker when applying remote changes (for sync)
+    /// This ensures current_version() reflects the latest synced version
+    pub async fn update_version_marker(&self, version: u64) {
+        // Add a synthetic marker change to track remote sync version
+        // This doesn't represent a local change but keeps version tracking accurate
+        let mut changes = self.changes.write().await;
+
+        // Only update if new version is higher
+        if let Some(last) = changes.back()
+            && version <= last.version()
+        {
+            return;
+        }
+
+        // Remove oldest if at capacity
+        if changes.len() >= self.max_size
+            && let Some(removed) = changes.pop_front()
+        {
+            let removed_version = removed.version();
+            let mut oldest = self.oldest_version.write().await;
+            *oldest = removed_version + 1;
+        }
+
+        // Add a marker indicating sync to this version
+        // Use a dummy deleted entry as a version marker
+        changes.push_back(RibChange::Deleted {
+            name: format!("__sync_marker_{}", version),
+            version,
+            timestamp: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        });
+    }
+}
+
 /// The Resource Information Base
 ///
 /// Thread-safe storage for all IPC Process state information.
@@ -80,14 +234,22 @@ pub struct Rib {
     objects: Arc<RwLock<HashMap<String, RibObject>>>,
     /// Counter for generating object versions
     version_counter: Arc<RwLock<u64>>,
+    /// Change log for incremental synchronization
+    change_log: RibChangeLog,
 }
 
 impl Rib {
-    /// Creates a new, empty RIB
+    /// Creates a new, empty RIB with default change log size (1000)
     pub fn new() -> Self {
+        Self::with_change_log_size(1000)
+    }
+
+    /// Creates a new RIB with specified change log size
+    pub fn with_change_log_size(change_log_size: usize) -> Self {
         Self {
             objects: Arc::new(RwLock::new(HashMap::new())),
             version_counter: Arc::new(RwLock::new(0)),
+            change_log: RibChangeLog::new(change_log_size),
         }
     }
 
@@ -121,6 +283,11 @@ impl Rib {
             version,
             last_modified: now,
         };
+
+        // Log the change for incremental sync
+        self.change_log
+            .log_change(RibChange::Created(obj.clone()))
+            .await;
 
         objects.insert(name, obj);
         Ok(())
@@ -159,6 +326,14 @@ impl Rib {
                     .duration_since(UNIX_EPOCH)
                     .unwrap()
                     .as_secs();
+
+                // Log the change for incremental sync
+                let updated_obj = obj.clone();
+                drop(objects); // Release lock before logging
+                self.change_log
+                    .log_change(RibChange::Updated(updated_obj))
+                    .await;
+
                 Ok(())
             }
             None => Err(format!("Object '{}' not found", name)),
@@ -177,7 +352,26 @@ impl Rib {
         let mut objects = self.objects.write().await;
 
         match objects.remove(name) {
-            Some(_) => Ok(()),
+            Some(obj) => {
+                let deleted_name = obj.name.clone();
+                drop(objects); // Release lock before logging
+
+                // Increment version for this deletion
+                let new_version = self.next_version().await;
+
+                self.change_log
+                    .log_change(RibChange::Deleted {
+                        name: deleted_name,
+                        version: new_version,
+                        timestamp: SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs(),
+                    })
+                    .await;
+
+                Ok(())
+            }
             None => Err(format!("Object '{}' not found", name)),
         }
     }
@@ -275,8 +469,14 @@ impl Rib {
     pub async fn merge_objects(&self, objects: Vec<RibObject>) -> usize {
         let mut local_objects = self.objects.write().await;
         let mut merged_count = 0;
+        let mut max_version = 0u64;
 
         for obj in objects {
+            // Track highest version
+            if obj.version > max_version {
+                max_version = obj.version;
+            }
+
             match local_objects.get(&obj.name) {
                 Some(existing) => {
                     // Only update if incoming version is newer
@@ -293,7 +493,97 @@ impl Rib {
             }
         }
 
+        // Update version counter to highest version seen
+        drop(local_objects);
+        if max_version > 0 {
+            let mut counter = self.version_counter.write().await;
+            if max_version > *counter {
+                *counter = max_version;
+            }
+
+            // Update change log version marker so current_version() is accurate
+            self.change_log.update_version_marker(max_version).await;
+        }
+
         merged_count
+    }
+
+    /// Get changes since a specific version (for incremental sync)
+    ///
+    /// # Returns
+    /// * `Ok(Vec<RibChange>)` - Changes since the requested version
+    /// * `Err(String)` - If requested version is too old (needs full sync)
+    pub async fn get_changes_since(&self, since_version: u64) -> Result<Vec<RibChange>, String> {
+        self.change_log.get_changes_since(since_version).await
+    }
+
+    /// Get current RIB version (latest change version)
+    pub async fn current_version(&self) -> u64 {
+        self.change_log.current_version().await
+    }
+
+    /// Apply incremental changes to RIB (for members receiving sync from bootstrap)
+    ///
+    /// Note: This method does NOT log changes to the change log, as these changes
+    /// originated from a remote IPCP and should not be re-propagated.
+    ///
+    /// # Returns
+    /// The number of changes successfully applied
+    pub async fn apply_changes(&self, changes: Vec<RibChange>) -> Result<usize, String> {
+        let mut applied = 0;
+        let mut max_version = 0u64;
+
+        for change in changes {
+            // Track highest version seen
+            let change_version = change.version();
+            if change_version > max_version {
+                max_version = change_version;
+            }
+
+            match change {
+                RibChange::Created(obj) => {
+                    // Don't log this change (it came from remote)
+                    let mut objects = self.objects.write().await;
+                    if !objects.contains_key(&obj.name) {
+                        objects.insert(obj.name.clone(), obj);
+                        applied += 1;
+                    }
+                }
+                RibChange::Updated(obj) => {
+                    let mut objects = self.objects.write().await;
+                    if let Some(existing) = objects.get_mut(&obj.name) {
+                        // Only apply if version is newer
+                        if obj.version > existing.version {
+                            *existing = obj;
+                            applied += 1;
+                        }
+                    } else {
+                        // Object doesn't exist locally, create it
+                        objects.insert(obj.name.clone(), obj);
+                        applied += 1;
+                    }
+                }
+                RibChange::Deleted { name, .. } => {
+                    let mut objects = self.objects.write().await;
+                    if objects.remove(&name).is_some() {
+                        applied += 1;
+                    }
+                }
+            }
+        }
+
+        // Update version counter to highest version seen
+        if max_version > 0 {
+            let mut counter = self.version_counter.write().await;
+            if max_version > *counter {
+                *counter = max_version;
+            }
+
+            // Update change log version marker so current_version() is accurate
+            self.change_log.update_version_marker(max_version).await;
+        }
+
+        Ok(applied)
     }
 
     /// Generates the next version number

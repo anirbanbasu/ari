@@ -35,8 +35,21 @@ static_routes = []
 # Enable saving/loading of dynamic routes for resilience
 enable_route_persistence = true
 # Path to snapshot file
-route_snapshot_path = "snapshots/ari-bootstrap-routes.toml"
+route_snapshot_path = "snapshots/route/ari-bootstrap.toml"
 # Default TTL for dynamic routes in seconds (3600 = 1 hour, 0 = never expires)
 route_ttl_seconds = 3600
 # Interval between automatic snapshots in seconds (300 = 5 minutes, 0 = disabled)
 route_snapshot_interval_seconds = 300
+
+[rib]
+# RIB state persistence for bootstrap resilience
+# Saves entire RIB state (flows, neighbors, addresses, etc.) to disk
+enable_rib_persistence = true
+# Path to RIB snapshot file (binary format)
+rib_snapshot_path = "snapshots/rib/ari-bootstrap.bin"
+# Interval between automatic RIB snapshots in seconds (300 = 5 minutes, 0 = disabled)
+rib_snapshot_interval_seconds = 300
+# Maximum number of changes to keep in change log for incremental sync
+change_log_size = 1000
+# Not used by bootstrap (only for members)
+rib_sync_interval_secs = 0

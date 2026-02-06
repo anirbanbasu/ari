@@ -40,3 +40,19 @@ static_routes = [
 # manage their own routing persistence. Only bootstrap IPCPs should enable this.
 # Set enable_route_persistence=false to avoid a startup warning.
 enable_route_persistence = false
+
+[rib]
+# RIB state persistence for member resilience
+# Members can optionally persist their RIB state locally for faster recovery
+# after restart (otherwise they'll re-sync from bootstrap)
+enable_rib_persistence = false
+# Path to RIB snapshot file (binary format)
+rib_snapshot_path = "snapshots/rib/ari-member.bin"
+# Interval between automatic RIB snapshots in seconds (0 = disabled)
+rib_snapshot_interval_seconds = 0
+# Maximum number of changes to keep in change log
+change_log_size = 1000
+# Periodic RIB synchronization from bootstrap (seconds)
+# Members periodically request incremental updates from bootstrap
+# Set to 0 to disable periodic sync (sync only during enrollment)
+rib_sync_interval_secs = 60

@@ -124,6 +124,8 @@ pub struct TomlConfig {
     pub enrollment: EnrollmentConfig,
     #[serde(default)]
     pub routing: RoutingConfig,
+    #[serde(default)]
+    pub rib: RibConfig,
 }
 
 /// IPCP section of config
@@ -226,6 +228,54 @@ fn default_snapshot_interval_seconds() -> u64 {
     300 // 5 minutes
 }
 
+/// RIB section of config
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RibConfig {
+    /// Enable persistence of RIB state (save/load from snapshot file)
+    #[serde(default)]
+    pub enable_rib_persistence: bool,
+    /// Path to RIB snapshot file (bincode format)
+    #[serde(default = "default_rib_snapshot_path")]
+    pub rib_snapshot_path: String,
+    /// Interval between automatic RIB snapshots in seconds (0 = disabled)
+    #[serde(default = "default_rib_snapshot_interval_seconds")]
+    pub rib_snapshot_interval_seconds: u64,
+    /// Maximum number of changes to keep in change log for incremental sync
+    #[serde(default = "default_change_log_size")]
+    pub change_log_size: usize,
+    /// RIB synchronization interval for members (seconds, 0 = disabled)
+    #[serde(default = "default_rib_sync_interval_seconds")]
+    pub rib_sync_interval_secs: u64,
+}
+
+fn default_rib_snapshot_path() -> String {
+    "rib-snapshot.bin".to_string()
+}
+
+fn default_rib_snapshot_interval_seconds() -> u64 {
+    300 // 5 minutes
+}
+
+fn default_change_log_size() -> usize {
+    1000
+}
+
+fn default_rib_sync_interval_seconds() -> u64 {
+    30 // 30 seconds
+}
+
+impl Default for RibConfig {
+    fn default() -> Self {
+        Self {
+            enable_rib_persistence: false,
+            rib_snapshot_path: default_rib_snapshot_path(),
+            rib_snapshot_interval_seconds: default_rib_snapshot_interval_seconds(),
+            change_log_size: default_change_log_size(),
+            rib_sync_interval_secs: default_rib_sync_interval_seconds(),
+        }
+    }
+}
+
 /// Unified configuration after parsing CLI or file
 #[derive(Debug, Clone)]
 pub struct IpcpConfiguration {
@@ -245,6 +295,11 @@ pub struct IpcpConfiguration {
     pub route_snapshot_path: String,
     pub route_ttl_seconds: u64,
     pub route_snapshot_interval_seconds: u64,
+    pub enable_rib_persistence: bool,
+    pub rib_snapshot_path: String,
+    pub rib_snapshot_interval_seconds: u64,
+    pub change_log_size: usize,
+    pub rib_sync_interval_secs: u64,
 }
 
 impl IpcpConfiguration {
@@ -279,6 +334,11 @@ impl IpcpConfiguration {
                     route_snapshot_path: default_route_snapshot_path(),
                     route_ttl_seconds: default_route_ttl_seconds(),
                     route_snapshot_interval_seconds: default_snapshot_interval_seconds(),
+                    enable_rib_persistence: false,
+                    rib_snapshot_path: default_rib_snapshot_path(),
+                    rib_snapshot_interval_seconds: default_rib_snapshot_interval_seconds(),
+                    change_log_size: default_change_log_size(),
+                    rib_sync_interval_secs: default_rib_sync_interval_seconds(),
                 })
             }
             IpcpMode::Bootstrap => {
@@ -308,6 +368,11 @@ impl IpcpConfiguration {
                     route_snapshot_path: default_route_snapshot_path(),
                     route_ttl_seconds: default_route_ttl_seconds(),
                     route_snapshot_interval_seconds: default_snapshot_interval_seconds(),
+                    enable_rib_persistence: false,
+                    rib_snapshot_path: default_rib_snapshot_path(),
+                    rib_snapshot_interval_seconds: default_rib_snapshot_interval_seconds(),
+                    change_log_size: default_change_log_size(),
+                    rib_sync_interval_secs: default_rib_sync_interval_seconds(),
                 })
             }
             IpcpMode::Member => {
@@ -337,6 +402,11 @@ impl IpcpConfiguration {
                     route_snapshot_path: default_route_snapshot_path(),
                     route_ttl_seconds: default_route_ttl_seconds(),
                     route_snapshot_interval_seconds: default_snapshot_interval_seconds(),
+                    enable_rib_persistence: false,
+                    rib_snapshot_path: default_rib_snapshot_path(),
+                    rib_snapshot_interval_seconds: default_rib_snapshot_interval_seconds(),
+                    change_log_size: default_change_log_size(),
+                    rib_sync_interval_secs: default_rib_sync_interval_seconds(),
                 })
             }
         }
@@ -376,6 +446,11 @@ impl IpcpConfiguration {
             route_snapshot_path: config.routing.route_snapshot_path,
             route_ttl_seconds: config.routing.route_ttl_seconds,
             route_snapshot_interval_seconds: config.routing.route_snapshot_interval_seconds,
+            enable_rib_persistence: config.rib.enable_rib_persistence,
+            rib_snapshot_path: config.rib.rib_snapshot_path,
+            rib_snapshot_interval_seconds: config.rib.rib_snapshot_interval_seconds,
+            change_log_size: config.rib.change_log_size,
+            rib_sync_interval_secs: config.rib.rib_sync_interval_secs,
         })
     }
 

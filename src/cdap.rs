@@ -7,7 +7,7 @@
 //! It enables RIB synchronization and provides operations for managing
 //! distributed state: CREATE, DELETE, READ, WRITE, START, STOP.
 
-use crate::rib::{Rib, RibValue};
+use crate::rib::{Rib, RibChange, RibValue};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -58,6 +58,37 @@ pub struct CdapMessage {
     pub result: i32,
     /// Result reason (error message if result != 0)
     pub result_reason: Option<String>,
+    /// Sync request (for incremental RIB synchronization)
+    #[serde(default)]
+    pub sync_request: Option<SyncRequest>,
+    /// Sync response (for incremental RIB synchronization)
+    #[serde(default)]
+    pub sync_response: Option<SyncResponse>,
+}
+
+/// Sync request message (sent by member to bootstrap)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncRequest {
+    /// Last known RIB version on this member
+    pub last_known_version: u64,
+    /// Requesting IPCP name
+    pub requester: String,
+}
+
+/// Sync response message (sent by bootstrap to member)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncResponse {
+    /// Current RIB version on bootstrap
+    pub current_version: u64,
+    /// Changes since requested version (None = full sync required)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub changes: Option<Vec<RibChange>>,
+    /// Full snapshot (if changes is None)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub full_snapshot: Option<Vec<u8>>,
+    /// Error message if sync failed
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 impl CdapMessage {
@@ -77,6 +108,8 @@ impl CdapMessage {
             invoke_id,
             result: 0,
             result_reason: None,
+            sync_request: None,
+            sync_response: None,
         }
     }
 
@@ -90,6 +123,52 @@ impl CdapMessage {
             invoke_id,
             result,
             result_reason,
+            sync_request: None,
+            sync_response: None,
+        }
+    }
+
+    /// Creates a new sync request message
+    pub fn new_sync_request(invoke_id: u64, last_known_version: u64, requester: String) -> Self {
+        Self {
+            op_code: CdapOpCode::Read,
+            obj_name: "rib_sync".to_string(),
+            obj_class: Some("sync".to_string()),
+            obj_value: None,
+            invoke_id,
+            result: 0,
+            result_reason: None,
+            sync_request: Some(SyncRequest {
+                last_known_version,
+                requester,
+            }),
+            sync_response: None,
+        }
+    }
+
+    /// Creates a new sync response message
+    pub fn new_sync_response(
+        invoke_id: u64,
+        current_version: u64,
+        changes: Option<Vec<RibChange>>,
+        full_snapshot: Option<Vec<u8>>,
+        error: Option<String>,
+    ) -> Self {
+        Self {
+            op_code: CdapOpCode::Read,
+            obj_name: "rib_sync".to_string(),
+            obj_class: Some("sync".to_string()),
+            obj_value: None,
+            invoke_id,
+            result: if error.is_some() { 1 } else { 0 },
+            result_reason: error.clone(),
+            sync_request: None,
+            sync_response: Some(SyncResponse {
+                current_version,
+                changes,
+                full_snapshot,
+                error,
+            }),
         }
     }
 

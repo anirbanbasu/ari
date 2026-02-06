@@ -47,7 +47,7 @@ pub use policies::{
     FifoScheduling, PriorityScheduling, QoSPolicy, RoutingPolicy, SchedulingPolicy,
     ShortestPathRouting, SimpleQoSPolicy,
 };
-pub use rib::{Rib, RibObject, RibValue};
+pub use rib::{Rib, RibChange, RibChangeLog, RibObject, RibValue};
 pub use rmt::{ForwardingEntry, Rmt};
 pub use routing::{RouteMetadata, RouteResolver, RouteResolverConfig, RouteSnapshot, RouteStats};
 pub use shim::{AddressMapper, UdpShim};
