@@ -592,6 +592,106 @@ impl Rib {
         *counter += 1;
         *counter
     }
+
+    /// Load RIB from snapshot file (binary format)
+    ///
+    /// # Arguments
+    /// * `path` - Path to the snapshot file
+    ///
+    /// # Returns
+    /// * `Ok(usize)` - Number of objects loaded
+    /// * `Err(String)` - If file read or deserialization fails
+    pub async fn load_snapshot_from_file(&self, path: &std::path::Path) -> Result<usize, String> {
+        if !path.exists() {
+            return Err(format!("Snapshot file not found: {:?}", path));
+        }
+
+        let data = std::fs::read(path)
+            .map_err(|e| format!("Failed to read snapshot file {:?}: {}", path, e))?;
+
+        if data.is_empty() {
+            return Ok(0);
+        }
+
+        let count = self.deserialize(&data).await?;
+        Ok(count)
+    }
+
+    /// Save RIB to snapshot file (binary format)
+    ///
+    /// # Arguments
+    /// * `path` - Path where snapshot should be saved
+    ///
+    /// # Returns
+    /// * `Ok(usize)` - Number of objects saved
+    /// * `Err(String)` - If serialization or file write fails
+    pub async fn save_snapshot_to_file(&self, path: &std::path::Path) -> Result<usize, String> {
+        let data = self.serialize().await;
+
+        if data.is_empty() {
+            return Ok(0);
+        }
+
+        // Create parent directories if they don't exist
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create directory {:?}: {}", parent, e))?;
+        }
+
+        std::fs::write(path, &data)
+            .map_err(|e| format!("Failed to write snapshot file {:?}: {}", path, e))?;
+
+        let object_count = self.count().await;
+        Ok(object_count)
+    }
+
+    /// Start background task for periodic RIB snapshots
+    ///
+    /// # Arguments
+    /// * `snapshot_path` - Path where snapshots should be saved
+    /// * `interval_seconds` - Interval between snapshots (0 = disabled)
+    ///
+    /// # Returns
+    /// A task handle that can be awaited or aborted
+    pub fn start_snapshot_task(
+        self: std::sync::Arc<Self>,
+        snapshot_path: std::path::PathBuf,
+        interval_seconds: u64,
+    ) -> tokio::task::JoinHandle<()> {
+        tokio::spawn(async move {
+            if interval_seconds == 0 {
+                println!("⚠️  RIB snapshot interval is 0 - snapshot task not started");
+                return;
+            }
+
+            println!(
+                "✅ Starting RIB snapshot task (interval: {}s, path: {:?})",
+                interval_seconds, snapshot_path
+            );
+
+            let mut ticker =
+                tokio::time::interval(tokio::time::Duration::from_secs(interval_seconds));
+
+            loop {
+                ticker.tick().await;
+
+                let count = self.count().await;
+                println!("🔄 RIB snapshot task tick: {} objects", count);
+
+                match self.save_snapshot_to_file(&snapshot_path).await {
+                    Ok(saved_count) => {
+                        println!(
+                            "💾 Saved {} RIB objects to snapshot: {:?}",
+                            saved_count, snapshot_path
+                        );
+                    }
+                    Err(e) => {
+                        eprintln!("⚠️  Failed to save RIB snapshot: {}", e);
+                    }
+                }
+            }
+        })
+    }
 }
 
 impl Default for Rib {
@@ -946,5 +1046,99 @@ mod tests {
         assert!(names.contains(&"obj1".to_string()));
         assert!(names.contains(&"obj2".to_string()));
         assert!(names.contains(&"obj3".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_rib_snapshot_file_operations() {
+        let temp_dir = std::env::temp_dir();
+        let snapshot_path = temp_dir.join("test_rib_snapshot.bin");
+
+        // Clean up any existing file
+        let _ = std::fs::remove_file(&snapshot_path);
+
+        // Create RIB with some objects
+        let rib1 = Rib::new();
+        rib1.create(
+            "flow-1".to_string(),
+            "flow".to_string(),
+            RibValue::Integer(100),
+        )
+        .await
+        .unwrap();
+        rib1.create(
+            "neighbor-1".to_string(),
+            "neighbor".to_string(),
+            RibValue::String("192.168.1.1".to_string()),
+        )
+        .await
+        .unwrap();
+        rib1.create(
+            "config".to_string(),
+            "settings".to_string(),
+            RibValue::Boolean(true),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(rib1.count().await, 3);
+
+        // Save to file
+        let saved_count = rib1.save_snapshot_to_file(&snapshot_path).await.unwrap();
+        assert_eq!(saved_count, 3);
+        assert!(snapshot_path.exists());
+
+        // Create new RIB and load from file
+        let rib2 = Rib::new();
+        assert_eq!(rib2.count().await, 0);
+
+        let loaded_count = rib2.load_snapshot_from_file(&snapshot_path).await.unwrap();
+        assert_eq!(loaded_count, 3);
+        assert_eq!(rib2.count().await, 3);
+
+        // Verify objects are correctly restored
+        let flow = rib2.read("flow-1").await.unwrap();
+        assert_eq!(flow.class, "flow");
+        assert_eq!(flow.value.as_integer(), Some(100));
+
+        let neighbor = rib2.read("neighbor-1").await.unwrap();
+        assert_eq!(neighbor.class, "neighbor");
+        assert_eq!(neighbor.value.as_string(), Some("192.168.1.1"));
+
+        let config = rib2.read("config").await.unwrap();
+        assert_eq!(config.class, "settings");
+        assert_eq!(config.value.as_boolean(), Some(true));
+
+        // Clean up
+        let _ = std::fs::remove_file(&snapshot_path);
+    }
+
+    #[tokio::test]
+    async fn test_rib_load_nonexistent_snapshot() {
+        let rib = Rib::new();
+        let nonexistent_path = std::path::PathBuf::from("/tmp/nonexistent_rib_snapshot_12345.bin");
+
+        // Should return error for nonexistent file
+        let result = rib.load_snapshot_from_file(&nonexistent_path).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_rib_save_empty_snapshot() {
+        let temp_dir = std::env::temp_dir();
+        let snapshot_path = temp_dir.join("test_empty_rib_snapshot.bin");
+
+        // Clean up any existing file
+        let _ = std::fs::remove_file(&snapshot_path);
+
+        // Create empty RIB
+        let rib = Rib::new();
+        assert_eq!(rib.count().await, 0);
+
+        // Save empty RIB (should succeed with 0 count)
+        let saved_count = rib.save_snapshot_to_file(&snapshot_path).await.unwrap();
+        assert_eq!(saved_count, 0);
+
+        // Clean up
+        let _ = std::fs::remove_file(&snapshot_path);
     }
 }

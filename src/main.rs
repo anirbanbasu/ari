@@ -424,8 +424,8 @@ async fn run_bootstrap_mode(config: IpcpConfiguration) {
 
     let local_addr = config.address.expect("Bootstrap mode requires an address");
 
-    // Initialize RIB first with static routes
-    println!("✓ Initializing RIB and loading static routes...");
+    // Initialize RIB first
+    println!("✓ Initializing RIB...");
     let rib = ari::rib::Rib::new();
     rib.create(
         "/dif/name".to_string(),
@@ -434,6 +434,25 @@ async fn run_bootstrap_mode(config: IpcpConfiguration) {
     )
     .await
     .unwrap();
+
+    // Load RIB snapshot if persistence is enabled
+    if config.enable_rib_persistence {
+        let rib_snapshot_path = std::path::Path::new(&config.rib_snapshot_path);
+        match rib.load_snapshot_from_file(rib_snapshot_path).await {
+            Ok(count) if count > 0 => {
+                println!("  ✓ Loaded {} RIB objects from snapshot", count);
+            }
+            Ok(_) => {
+                println!("  ℹ️  No RIB objects to load from snapshot");
+            }
+            Err(e) => {
+                eprintln!("  ⚠️  Failed to load RIB snapshot: {}", e);
+            }
+        }
+    }
+
+    // Load static routes into RIB
+    println!("\n✓ Loading static routes into RIB...");
 
     // Load static routes into RIB
     for route in &config.static_routes {
@@ -493,8 +512,25 @@ async fn run_bootstrap_mode(config: IpcpConfiguration) {
         let resolver_clone = route_resolver.clone();
         let _snapshot_task = resolver_clone.start_snapshot_task();
         println!(
-            "  Snapshot task started (interval: {}s)",
+            "  Route snapshot task started (interval: {}s)",
             config.route_snapshot_interval_seconds
+        );
+    }
+
+    // Start RIB snapshot task for periodic saves
+    if config.enable_rib_persistence && config.rib_snapshot_interval_seconds > 0 {
+        // Clone RIB for snapshot task
+        let rib_for_snapshot = {
+            let rib_lock = rib_arc.read().await;
+            rib_lock.clone()
+        };
+        let rib_snapshot_path = std::path::PathBuf::from(&config.rib_snapshot_path);
+        let rib_snapshot_interval = config.rib_snapshot_interval_seconds;
+        let _rib_snapshot_task = std::sync::Arc::new(rib_for_snapshot)
+            .start_snapshot_task(rib_snapshot_path, rib_snapshot_interval);
+        println!(
+            "  RIB snapshot task started (interval: {}s)",
+            config.rib_snapshot_interval_seconds
         );
     }
     println!();
@@ -703,6 +739,22 @@ async fn run_member_mode(config: IpcpConfiguration) {
     println!("\n✓ Setting up enrollment manager...");
     let rib = Rib::new();
 
+    // Load RIB snapshot if persistence is enabled
+    if config.enable_rib_persistence {
+        let rib_snapshot_path = std::path::Path::new(&config.rib_snapshot_path);
+        match rib.load_snapshot_from_file(rib_snapshot_path).await {
+            Ok(count) if count > 0 => {
+                println!("  ✓ Loaded {} RIB objects from snapshot", count);
+            }
+            Ok(_) => {
+                println!("  ℹ️  No RIB objects to load from snapshot");
+            }
+            Err(e) => {
+                eprintln!("  ⚠️  Failed to load RIB snapshot: {}", e);
+            }
+        }
+    }
+
     // Load static routes into RIB (before enrollment)
     println!("\n✓ Loading static routes into RIB...");
     for route in &config.static_routes {
@@ -735,6 +787,14 @@ async fn run_member_mode(config: IpcpConfiguration) {
     }
     println!("  Loaded {} static routes", config.static_routes.len());
 
+    // Clone RIB for snapshot task (if enabled) before moving it to enrollment manager
+    let rib_for_snapshot =
+        if config.enable_rib_persistence && config.rib_snapshot_interval_seconds > 0 {
+            Some(rib.clone())
+        } else {
+            None
+        };
+
     let shim = Arc::new(UdpShim::new(local_addr));
 
     // Bind shim to UDP socket
@@ -758,6 +818,18 @@ async fn run_member_mode(config: IpcpConfiguration) {
         "  Enrollment manager ready (timeout: {}s, retries: {})",
         config.enrollment_timeout_secs, config.enrollment_max_retries
     );
+
+    // Start RIB snapshot task if enabled
+    if let Some(rib_snapshot) = rib_for_snapshot {
+        let rib_snapshot_path = std::path::PathBuf::from(&config.rib_snapshot_path);
+        let rib_snapshot_interval = config.rib_snapshot_interval_seconds;
+        let _rib_snapshot_task = std::sync::Arc::new(rib_snapshot)
+            .start_snapshot_task(rib_snapshot_path, rib_snapshot_interval);
+        println!(
+            "  RIB snapshot task started (interval: {}s)",
+            config.rib_snapshot_interval_seconds
+        );
+    }
 
     // Attempt enrollment with bootstrap peers
     println!("\n✓ Initiating enrollment with bootstrap IPCP...");
