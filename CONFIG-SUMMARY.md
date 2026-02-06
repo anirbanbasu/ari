@@ -193,26 +193,29 @@ cargo run -- \
 - Local multi-IPCP testing with different ports
 - Distributed testing across machines
 
-## What's Still TODO
+## What's Been Completed
 
-### 1. Full Enrollment Protocol
-Currently placeholder implemented. Needs:
-- Actual EnrollmentRequest/Response messages
-- CDAP-based RIB synchronization
-- Address assignment logic
-- Neighbor discovery
+✅ **Enrollment Protocol** (Phases 1-5)
+- EnrollmentRequest/Response messages (Phase 1-2)
+- CDAP-based RIB synchronization (Phase 2-3)
+- Address assignment from bootstrap (Phase 3)
+- Neighbor discovery (Phase 3)
+- Connection monitoring and re-enrollment (Phase 5)
+- Typed error handling (Phase 4)
 
-### 2. Inter-IPCP Communication
+✅ **Inter-IPCP Communication**
 - Send/receive PDUs over shim layer
 - CDAP message exchange over network
 - Flow allocation between IPCPs
 
-### 3. Dynamic Routing
+## What's Still TODO
+
+### 1. Dynamic Routing
 - Route updates via CDAP
 - Forwarding table synchronization
 - Link state/distance vector protocols
 
-### 4. Advanced Features
+### 2. Advanced Features
 - Multiple DIFs per IPCP
 - DIF hierarchy (N-DIF over N-1-DIF)
 - Policy configuration via config file

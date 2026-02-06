@@ -52,36 +52,42 @@ The current documentation is scattered and will be consolidated over time. For n
 - ✅ Multi-IPCP configuration system
 - ✅ Static routing with hybrid learning
 - ✅ End-to-end data transfer (Phase 2)
+- ✅ Dynamic address assignment (Phase 3)
+- ✅ Typed error system with `thiserror` (Phase 4)
+- ✅ Connection monitoring and re-enrollment (Phase 5)
 
 ### In Progress
-- ⚠️ Full enrollment protocol implementation
-- ⚠️ CDAP synchronization over network
 - ⚠️ Inter-IPCP flow allocation
+- ⚠️ CDAP incremental synchronization
 
 ### Enrollment Implementation
 
-The enrollment protocol is **fully implemented** ✅ with async network communication, enabling member IPCPs to join a DIF:
+The enrollment protocol is **fully implemented** ✅ with async network communication, dynamic address assignment, and automatic re-enrollment:
 
 #### Core Features (Implemented)
 - **Fully Async**: tokio-based async/await throughout the enrollment flow
-- **Timeout & Retry**: 30-second timeout per attempt, 3 retry attempts with exponential backoff (1s, 2s, 4s)
+- **Timeout & Retry**: Configurable timeout per attempt with exponential backoff
 - **Binary Protocol**: Efficient bincode serialization for CDAP messages over PDUs
+- **Dynamic Address Assignment**: Bootstrap allocates addresses from configurable pool (Phase 3)
 - **Address Mapping**: Dynamic RINA ↔ socket address translation with auto-registration
+- **RIB Synchronization**: Full RIB snapshot transfer during enrollment
 - **Bidirectional**: Handles both member-initiated requests and bootstrap responses
-- **Error Resilient**: Comprehensive error handling for network, serialization, and timeout errors
+- **Typed Errors**: Structured error handling with `thiserror` (Phase 4)
+- **Connection Monitoring**: Heartbeat-based health tracking (Phase 5)
+- **Automatic Re-enrollment**: Recovers from temporary network failures (Phase 5)
 
 #### Enrollment Flow
 1. **Member IPCP**: Initiates enrollment by sending CDAP CREATE message via UDP PDU
-2. **Bootstrap IPCP**: Receives request, validates, and responds with DIF name
-3. **Member IPCP**: Receives response, updates state to Enrolled, stores DIF name in RIB
+2. **Bootstrap IPCP**: Receives request, allocates address from pool, sends response with RIB snapshot
+3. **Member IPCP**: Receives assigned address, synchronizes RIB, stores DIF name
 4. **Retry Logic**: Automatically retries with backoff if enrollment fails
+5. **Dynamic Routing**: Bootstrap creates route to member, member syncs routes from bootstrap
+6. **Connection Monitoring**: Background task monitors heartbeat and triggers re-enrollment if needed
 
 #### Future Enhancements (Not Yet Implemented)
-- **Address Assignment**: Bootstrap assigns dynamic addresses from pool
-- **RIB Synchronization**: Full RIB snapshot transfer and incremental updates
-- **Multi-peer Bootstrap**: Peer selection, failover, and dynamic discovery
 - **Security**: Authentication, encryption, and certificate validation
-- **Re-enrollment**: Automatic re-enrollment after network failures
+- **CDAP Incremental Sync**: Incremental RIB updates instead of full snapshots
+- **Multi-peer Bootstrap**: Peer selection, failover, and dynamic discovery
 
 ## License
 

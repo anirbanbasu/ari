@@ -696,6 +696,8 @@ async fn run_member_mode(config: IpcpConfiguration) {
         timeout: std::time::Duration::from_secs(config.enrollment_timeout_secs),
         max_retries: config.enrollment_max_retries,
         initial_backoff_ms: config.enrollment_initial_backoff_ms,
+        heartbeat_interval_secs: 30, // Default: heartbeat every 30 seconds
+        connection_timeout_secs: 90, // Default: re-enroll if no heartbeat for 90 seconds
     };
     let mut enrollment_mgr =
         EnrollmentManager::with_config(rib, shim.clone(), local_addr, enrollment_config);

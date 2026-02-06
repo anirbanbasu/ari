@@ -8,13 +8,15 @@
 
 use crate::cdap::{CdapMessage, CdapOpCode};
 use crate::directory::AddressPool;
+use crate::error::EnrollmentError;
 use crate::pdu::Pdu;
 use crate::rib::{Rib, RibValue};
 use crate::shim::UdpShim;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+use tokio::sync::RwLock;
 use tokio::time::{sleep, timeout};
 
 /// Configuration for enrollment behavior
@@ -26,6 +28,10 @@ pub struct EnrollmentConfig {
     pub max_retries: u32,
     /// Initial backoff duration in milliseconds (doubles on each retry)
     pub initial_backoff_ms: u64,
+    /// Heartbeat interval for connection monitoring (0 = disabled)
+    pub heartbeat_interval_secs: u64,
+    /// Connection timeout before triggering re-enrollment
+    pub connection_timeout_secs: u64,
 }
 
 impl Default for EnrollmentConfig {
@@ -34,6 +40,8 @@ impl Default for EnrollmentConfig {
             timeout: Duration::from_secs(5),
             max_retries: 3,
             initial_backoff_ms: 1000,
+            heartbeat_interval_secs: 30, // Heartbeat every 30 seconds
+            connection_timeout_secs: 90, // Re-enroll if no heartbeat for 90 seconds
         }
     }
 }
@@ -126,6 +134,12 @@ pub struct EnrollmentManager {
     config: EnrollmentConfig,
     /// Address pool for bootstrap IPCP (None for member IPCPs)
     address_pool: Option<Arc<AddressPool>>,
+    /// Bootstrap address for re-enrollment (None for bootstrap IPCP)
+    bootstrap_addr: Option<u64>,
+    /// Last successful heartbeat time
+    last_heartbeat: Arc<RwLock<Option<Instant>>>,
+    /// Whether re-enrollment is in progress
+    re_enrollment_in_progress: Arc<RwLock<bool>>,
 }
 
 impl EnrollmentManager {
@@ -149,6 +163,9 @@ impl EnrollmentManager {
             shim,
             config,
             address_pool: None,
+            bootstrap_addr: None,
+            last_heartbeat: Arc::new(RwLock::new(None)),
+            re_enrollment_in_progress: Arc::new(RwLock::new(false)),
         }
     }
 
@@ -168,6 +185,9 @@ impl EnrollmentManager {
             shim,
             config: EnrollmentConfig::default(),
             address_pool: Some(Arc::new(AddressPool::new(pool_start, pool_end))),
+            bootstrap_addr: None, // Bootstrap has no bootstrap
+            last_heartbeat: Arc::new(RwLock::new(Some(Instant::now()))),
+            re_enrollment_in_progress: Arc::new(RwLock::new(false)),
         }
     }
 
@@ -193,13 +213,20 @@ impl EnrollmentManager {
     }
 
     /// Enrol with bootstrap IPCP with timeout and retry logic
-    pub async fn enrol_with_bootstrap(&mut self, bootstrap_addr: u64) -> Result<String, String> {
+    pub async fn enrol_with_bootstrap(
+        &mut self,
+        bootstrap_addr: u64,
+    ) -> Result<String, EnrollmentError> {
         for attempt in 1..=self.config.max_retries {
             println!("Enrollment attempt {}/{}", attempt, self.config.max_retries);
 
             match timeout(self.config.timeout, self.try_enrol(bootstrap_addr)).await {
                 Ok(Ok(dif_name)) => {
                     println!("Successfully enrolled in DIF: {}", dif_name);
+                    // Save bootstrap address for re-enrollment
+                    self.bootstrap_addr = Some(bootstrap_addr);
+                    // Initialize heartbeat
+                    *self.last_heartbeat.write().await = Some(Instant::now());
                     return Ok(dif_name);
                 }
                 Ok(Err(e)) => {
@@ -218,15 +245,18 @@ impl EnrollmentManager {
             }
         }
 
-        Err(format!(
-            "Enrollment failed after {} attempts",
-            self.config.max_retries
-        ))
+        Err(EnrollmentError::Timeout {
+            attempts: self.config.max_retries,
+        })
     }
 
     /// Single enrollment attempt
-    async fn try_enrol(&mut self, bootstrap_addr: u64) -> Result<String, String> {
-        let ipcp_name = self.ipcp_name.as_ref().ok_or("IPCP name not set")?.clone();
+    async fn try_enrol(&mut self, bootstrap_addr: u64) -> Result<String, EnrollmentError> {
+        let ipcp_name = self
+            .ipcp_name
+            .as_ref()
+            .ok_or(EnrollmentError::IpcpNameNotSet)?
+            .clone();
 
         // Create enrollment request
         let request = EnrollmentRequest {
@@ -247,7 +277,7 @@ impl EnrollmentManager {
             obj_class: Some("enrollment".to_string()),
             obj_value: Some(RibValue::Bytes(
                 bincode::serialize(&request)
-                    .map_err(|e| format!("Failed to serialize request: {}", e))?,
+                    .map_err(|e| EnrollmentError::SerializationFailed(e.to_string()))?,
             )),
             invoke_id: 1,
             result: 0,
@@ -256,7 +286,7 @@ impl EnrollmentManager {
 
         // Serialize CDAP message with bincode
         let cdap_bytes = bincode::serialize(&cdap_msg)
-            .map_err(|e| format!("Failed to serialize CDAP message: {}", e))?;
+            .map_err(|e| EnrollmentError::SerializationFailed(e.to_string()))?;
 
         // Create PDU with CDAP payload
         let pdu = Pdu::new_data(
@@ -271,7 +301,7 @@ impl EnrollmentManager {
         // Send enrollment request
         self.shim
             .send_pdu(&pdu)
-            .map_err(|e| format!("Failed to send enrollment request: {}", e))?;
+            .map_err(|e| EnrollmentError::SendFailed(e.to_string()))?;
 
         println!("Sent enrollment request to bootstrap IPCP");
 
@@ -279,14 +309,17 @@ impl EnrollmentManager {
         let response = self.receive_response().await?;
 
         // Deserialize enrollment response from CDAP message
-        let response_bytes = response
-            .obj_value
-            .as_ref()
-            .ok_or("Response does not contain value")?;
+        let response_bytes =
+            response
+                .obj_value
+                .as_ref()
+                .ok_or(EnrollmentError::InvalidResponse(
+                    "Response does not contain value".to_string(),
+                ))?;
 
         let enroll_response: EnrollmentResponse = match response_bytes {
             RibValue::Bytes(bytes) => bincode::deserialize(bytes)
-                .map_err(|e| format!("Failed to deserialize enrollment response: {}", e))?,
+                .map_err(|e| EnrollmentError::DeserializationFailed(e.to_string()))?,
             RibValue::String(s) => {
                 // Legacy support for old string-based responses
                 EnrollmentResponse {
@@ -297,13 +330,19 @@ impl EnrollmentManager {
                     rib_snapshot: None,
                 }
             }
-            _ => return Err("Invalid response format".to_string()),
+            _ => {
+                return Err(EnrollmentError::InvalidResponse(
+                    "Unexpected response format".to_string(),
+                ));
+            }
         };
 
         if !enroll_response.accepted {
-            return Err(enroll_response
-                .error
-                .unwrap_or_else(|| "Enrollment rejected".to_string()));
+            return Err(EnrollmentError::Rejected(
+                enroll_response
+                    .error
+                    .unwrap_or_else(|| "No reason provided".to_string()),
+            ));
         }
 
         // Update local address if one was assigned
@@ -354,7 +393,7 @@ impl EnrollmentManager {
     }
 
     /// Synchronize routing table from bootstrap's RIB
-    async fn sync_routes_from_bootstrap(&self, bootstrap_addr: u64) -> Result<(), String> {
+    async fn sync_routes_from_bootstrap(&self, bootstrap_addr: u64) -> Result<(), EnrollmentError> {
         // Request all static routes from bootstrap
         let cdap_msg = CdapMessage {
             op_code: CdapOpCode::Read,
@@ -367,13 +406,13 @@ impl EnrollmentManager {
         };
 
         let cdap_bytes = bincode::serialize(&cdap_msg)
-            .map_err(|e| format!("Failed to serialize CDAP message: {}", e))?;
+            .map_err(|e| EnrollmentError::SerializationFailed(e.to_string()))?;
 
         let pdu = Pdu::new_data(self.local_addr, bootstrap_addr, 0, 0, 0, cdap_bytes);
 
         self.shim
             .send_pdu(&pdu)
-            .map_err(|e| format!("Failed to send route request: {}", e))?;
+            .map_err(|e| EnrollmentError::SendFailed(e.to_string()))?;
 
         // Wait for routing table response (no filter on obj_class)
         match self.receive_cdap_response(None).await {
@@ -400,7 +439,7 @@ impl EnrollmentManager {
     }
 
     /// Receive enrollment response with polling
-    async fn receive_response(&self) -> Result<CdapMessage, String> {
+    async fn receive_response(&self) -> Result<CdapMessage, EnrollmentError> {
         self.receive_cdap_response(Some("enrollment")).await
     }
 
@@ -408,7 +447,7 @@ impl EnrollmentManager {
     async fn receive_cdap_response(
         &self,
         expected_class: Option<&str>,
-    ) -> Result<CdapMessage, String> {
+    ) -> Result<CdapMessage, EnrollmentError> {
         let poll_interval = Duration::from_millis(100);
         let max_polls = (self.config.timeout.as_millis() / poll_interval.as_millis()) as u32;
 
@@ -416,11 +455,11 @@ impl EnrollmentManager {
             if let Some((pdu, _src_addr)) = self
                 .shim
                 .receive_pdu()
-                .map_err(|e| format!("Failed to receive PDU: {}", e))?
+                .map_err(|e| EnrollmentError::ReceiveFailed(e.to_string()))?
             {
                 // Deserialize CDAP message from PDU payload
                 let cdap_msg: CdapMessage = bincode::deserialize(&pdu.payload)
-                    .map_err(|e| format!("Failed to deserialize CDAP message: {}", e))?;
+                    .map_err(|e| EnrollmentError::DeserializationFailed(e.to_string()))?;
 
                 // If expected_class is specified, filter by it
                 if let Some(expected) = expected_class {
@@ -428,7 +467,10 @@ impl EnrollmentManager {
                         if cdap_msg.result == 0 {
                             return Ok(cdap_msg);
                         } else {
-                            return Err(format!("Request rejected with code: {}", cdap_msg.result));
+                            return Err(EnrollmentError::Rejected(format!(
+                                "Request rejected with code: {}",
+                                cdap_msg.result
+                            )));
                         }
                     }
                 } else {
@@ -436,7 +478,10 @@ impl EnrollmentManager {
                     if cdap_msg.result == 0 {
                         return Ok(cdap_msg);
                     } else {
-                        return Err(format!("Request rejected with code: {}", cdap_msg.result));
+                        return Err(EnrollmentError::Rejected(format!(
+                            "Request rejected with code: {}",
+                            cdap_msg.result
+                        )));
                     }
                 }
             }
@@ -444,7 +489,9 @@ impl EnrollmentManager {
             sleep(poll_interval).await;
         }
 
-        Err("No response received".to_string())
+        Err(EnrollmentError::ReceiveFailed(
+            "No response received".to_string(),
+        ))
     }
 
     /// Handle incoming enrollment request (bootstrap side)
@@ -452,25 +499,27 @@ impl EnrollmentManager {
         &self,
         pdu: &Pdu,
         src_socket_addr: SocketAddr,
-    ) -> Result<(), String> {
+    ) -> Result<(), EnrollmentError> {
         // Register the peer mapping so we can send response back
         self.shim.register_peer(pdu.src_addr, src_socket_addr);
 
         // Deserialize CDAP message from PDU payload
         let cdap_msg: CdapMessage = bincode::deserialize(&pdu.payload)
-            .map_err(|e| format!("Failed to deserialize CDAP message: {}", e))?;
+            .map_err(|e| EnrollmentError::DeserializationFailed(e.to_string()))?;
 
         // Check if this is an enrollment request
         if cdap_msg.obj_class.as_deref() != Some("enrollment")
             || cdap_msg.op_code != CdapOpCode::Create
         {
-            return Err("Not an enrollment request".to_string());
+            return Err(EnrollmentError::InvalidResponse(
+                "Not an enrollment request".to_string(),
+            ));
         }
 
         // Extract enrollment request
         let enroll_request: EnrollmentRequest = match &cdap_msg.obj_value {
             Some(RibValue::Bytes(bytes)) => bincode::deserialize(bytes)
-                .map_err(|e| format!("Failed to deserialize request: {}", e))?,
+                .map_err(|e| EnrollmentError::DeserializationFailed(e.to_string()))?,
             Some(RibValue::String(name)) => {
                 // Legacy support for old string-based requests
                 EnrollmentRequest {
@@ -484,7 +533,11 @@ impl EnrollmentManager {
                     request_address: false,
                 }
             }
-            _ => return Err("Invalid enrollment request format".to_string()),
+            _ => {
+                return Err(EnrollmentError::InvalidResponse(
+                    "Invalid enrollment request format".to_string(),
+                ));
+            }
         };
 
         println!(
@@ -493,15 +546,20 @@ impl EnrollmentManager {
         );
 
         // Get DIF name from RIB
-        let dif_name_obj = self
-            .rib
-            .read("/dif/name")
-            .await
-            .ok_or("Bootstrap DIF name not set in RIB")?;
+        let dif_name_obj =
+            self.rib
+                .read("/dif/name")
+                .await
+                .ok_or(EnrollmentError::InvalidState {
+                    expected: "DIF name configured".to_string(),
+                    actual: "DIF name not set in RIB".to_string(),
+                })?;
         let dif_name = dif_name_obj
             .value
             .as_string()
-            .ok_or("DIF name is not a string")?
+            .ok_or(EnrollmentError::InvalidResponse(
+                "DIF name is not a string".to_string(),
+            ))?
             .to_string();
 
         // Allocate address if requested
@@ -529,7 +587,9 @@ impl EnrollmentManager {
                 },
                 None => {
                     println!("  ✗ No address pool configured");
-                    return Err("Bootstrap has no address pool".to_string());
+                    return Err(EnrollmentError::AddressAssignmentFailed(
+                        "Bootstrap has no address pool".to_string(),
+                    ));
                 }
             }
         } else {
@@ -593,7 +653,12 @@ impl EnrollmentManager {
                 self.rib
                     .create(route_name.clone(), "route".to_string(), route_value)
                     .await
-                    .map_err(|e| format!("Failed to create dynamic route: {}", e))?;
+                    .map_err(|e| {
+                        EnrollmentError::RibSyncFailed(format!(
+                            "Failed to create dynamic route: {}",
+                            e
+                        ))
+                    })?;
 
                 println!(
                     "  ✓ Created dynamic route: {} → {} ({})",
@@ -613,10 +678,10 @@ impl EnrollmentManager {
         request_pdu: &Pdu,
         response: &EnrollmentResponse,
         request_cdap: &CdapMessage,
-    ) -> Result<(), String> {
+    ) -> Result<(), EnrollmentError> {
         // Serialize enrollment response
         let response_bytes = bincode::serialize(response)
-            .map_err(|e| format!("Failed to serialize enrollment response: {}", e))?;
+            .map_err(|e| EnrollmentError::SerializationFailed(e.to_string()))?;
 
         // Create CDAP response message
         let cdap_response = CdapMessage {
@@ -631,7 +696,7 @@ impl EnrollmentManager {
 
         // Serialize CDAP response
         let cdap_bytes = bincode::serialize(&cdap_response)
-            .map_err(|e| format!("Failed to serialize CDAP response: {}", e))?;
+            .map_err(|e| EnrollmentError::SerializationFailed(e.to_string()))?;
 
         // Create response PDU
         let response_pdu = Pdu::new_data(
@@ -646,7 +711,7 @@ impl EnrollmentManager {
         // Send response
         self.shim
             .send_pdu(&response_pdu)
-            .map_err(|e| format!("Failed to send enrollment response: {}", e))?;
+            .map_err(|e| EnrollmentError::SendFailed(e.to_string()))?;
 
         Ok(())
     }
@@ -656,10 +721,10 @@ impl EnrollmentManager {
         &self,
         pdu: &Pdu,
         src_socket_addr: SocketAddr,
-    ) -> Result<(), String> {
+    ) -> Result<(), EnrollmentError> {
         // Deserialize CDAP message from PDU payload
         let cdap_msg: CdapMessage = bincode::deserialize(&pdu.payload)
-            .map_err(|e| format!("Failed to deserialize CDAP message: {}", e))?;
+            .map_err(|e| EnrollmentError::DeserializationFailed(e.to_string()))?;
 
         // Route based on operation type and object class
         match (&cdap_msg.op_code, cdap_msg.obj_class.as_deref()) {
@@ -684,7 +749,7 @@ impl EnrollmentManager {
         &self,
         pdu: &Pdu,
         request: &CdapMessage,
-    ) -> Result<(), String> {
+    ) -> Result<(), EnrollmentError> {
         // For now, return an empty routing table since member has static routes
         // In future phases, this could return actual routing information
         let response = CdapMessage {
@@ -698,15 +763,125 @@ impl EnrollmentManager {
         };
 
         let response_bytes = bincode::serialize(&response)
-            .map_err(|e| format!("Failed to serialize routing response: {}", e))?;
+            .map_err(|e| EnrollmentError::SerializationFailed(e.to_string()))?;
 
         let response_pdu = Pdu::new_data(self.local_addr, pdu.src_addr, 0, 0, 0, response_bytes);
 
         self.shim
             .send_pdu(&response_pdu)
-            .map_err(|e| format!("Failed to send routing response: {}", e))?;
+            .map_err(|e| EnrollmentError::SendFailed(e.to_string()))?;
 
         Ok(())
+    }
+
+    /// Start connection monitoring task (member IPCP only)
+    /// Returns a task handle that can be awaited or aborted
+    pub fn start_connection_monitoring(&mut self) -> tokio::task::JoinHandle<()> {
+        if self.config.heartbeat_interval_secs == 0 {
+            // Monitoring disabled
+            return tokio::spawn(async {});
+        }
+
+        let last_heartbeat = self.last_heartbeat.clone();
+        let re_enrollment_in_progress = self.re_enrollment_in_progress.clone();
+        let connection_timeout = Duration::from_secs(self.config.connection_timeout_secs);
+        let check_interval = Duration::from_secs(self.config.heartbeat_interval_secs / 2);
+        let bootstrap_addr = self.bootstrap_addr;
+        let shim = self.shim.clone();
+        let rib = self.rib.clone();
+        let ipcp_name = self.ipcp_name.clone();
+        let local_addr = self.local_addr;
+        let config = self.config.clone();
+
+        tokio::spawn(async move {
+            loop {
+                sleep(check_interval).await;
+
+                // Check if connection is still alive
+                let last_beat = *last_heartbeat.read().await;
+                if let Some(last) = last_beat {
+                    let elapsed = last.elapsed();
+                    if elapsed > connection_timeout {
+                        println!(
+                            "⚠️  Connection timeout detected ({}s since last heartbeat)",
+                            elapsed.as_secs()
+                        );
+
+                        // Check if re-enrollment is already in progress
+                        let mut in_progress = re_enrollment_in_progress.write().await;
+                        if !*in_progress {
+                            *in_progress = true;
+                            drop(in_progress); // Release lock before re-enrollment
+
+                            // Attempt re-enrollment
+                            if let Some(bootstrap) = bootstrap_addr {
+                                println!("🔄 Attempting automatic re-enrollment...");
+
+                                let mut temp_manager = EnrollmentManager::with_config(
+                                    rib.clone(),
+                                    shim.clone(),
+                                    local_addr,
+                                    config.clone(),
+                                );
+
+                                if let Some(name) = &ipcp_name {
+                                    temp_manager.set_ipcp_name(name.clone());
+                                }
+
+                                match temp_manager.enrol_with_bootstrap(bootstrap).await {
+                                    Ok(_dif_name) => {
+                                        println!("✅ Re-enrollment successful!");
+                                        *last_heartbeat.write().await = Some(Instant::now());
+                                    }
+                                    Err(e) => {
+                                        eprintln!("❌ Re-enrollment failed: {}", e);
+                                    }
+                                }
+
+                                *re_enrollment_in_progress.write().await = false;
+                            }
+                        }
+                    }
+                }
+            }
+        })
+    }
+
+    /// Update heartbeat timestamp (called when receiving messages from bootstrap)
+    pub async fn update_heartbeat(&self) {
+        *self.last_heartbeat.write().await = Some(Instant::now());
+    }
+
+    /// Check if connection is healthy
+    pub async fn is_connection_healthy(&self) -> bool {
+        if let Some(last) = *self.last_heartbeat.read().await {
+            let timeout = Duration::from_secs(self.config.connection_timeout_secs);
+            last.elapsed() < timeout
+        } else {
+            false // No heartbeat recorded yet
+        }
+    }
+
+    /// Trigger manual re-enrollment
+    pub async fn re_enroll(&mut self) -> Result<String, EnrollmentError> {
+        let bootstrap_addr = self
+            .bootstrap_addr
+            .ok_or(EnrollmentError::NoBootstrapPeers)?;
+
+        println!("🔄 Manual re-enrollment initiated");
+
+        // Reset state
+        self.state = EnrollmentState::Initiated;
+
+        // Attempt enrollment
+        let result = self.enrol_with_bootstrap(bootstrap_addr).await;
+
+        // Update heartbeat on success
+        if result.is_ok() {
+            *self.last_heartbeat.write().await = Some(Instant::now());
+        }
+
+        result
     }
 }
 

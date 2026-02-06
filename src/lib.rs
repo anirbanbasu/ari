@@ -14,6 +14,7 @@ pub mod config;
 pub mod directory;
 pub mod efcp;
 pub mod enrollment;
+pub mod error;
 pub mod fal;
 pub mod ipcp;
 pub mod pdu;
@@ -34,6 +35,10 @@ pub use enrollment::{
     DifConfiguration, EnrollmentManager, EnrollmentRequest, EnrollmentResponse, EnrollmentState,
     NeighborInfo,
 };
+pub use error::{
+    AriError, CdapError, EfcpError, EnrollmentError, RibError, RmtError, SerializationError,
+    ShimError,
+};
 pub use fal::{AllocatedFlow, FlowAllocator, FlowState};
 pub use ipcp::{IpcProcess, IpcpState};
 pub use pdu::{Pdu, PduType, QoSParameters};
@@ -43,7 +48,7 @@ pub use policies::{
 };
 pub use rib::{Rib, RibObject, RibValue};
 pub use rmt::{ForwardingEntry, Rmt};
-pub use shim::{AddressMapper, ShimError, UdpShim};
+pub use shim::{AddressMapper, UdpShim};
 
 /// Represents a Distributed IPC Facility (DIF).
 ///

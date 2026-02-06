@@ -171,32 +171,28 @@ The tests in `src/enrollment.rs` validate:
 
 The current implementation supports basic enrollment with the following limitations:
 
-1. **Address Assignment**: Member IPCPs do not receive dynamic address assignments from bootstrap
-   - Member uses address 0 as placeholder
-   - No address pool management in bootstrap
-
-2. **RIB Synchronization**: Limited RIB data transfer
-   - Only DIF name is synchronized
-   - No full RIB snapshot or incremental updates
-
-3. **Single Bootstrap Peer**: No multi-peer support yet
+1. **Single Bootstrap Peer**: No multi-peer support yet
    - Member tries only one bootstrap peer
    - No peer selection or failover logic
 
-4. **No Security**: Enrollment messages are not authenticated
+2. **No Security**: Enrollment messages are not authenticated
    - No mutual authentication
    - No encryption of enrollment data
    - No certificate validation
 
-5. **No Re-enrollment**: Cannot recover from network failures
-   - No keep-alive mechanism
-   - No automatic re-enrollment after disconnection
+**Previously Addressed Limitations:**
+
+✅ **Address Assignment** (Phase 3): Bootstrap assigns unique addresses
+✅ **RIB Synchronization** (Phase 3): Full RIB snapshot transfer with neighbors
+✅ **Re-enrollment** (Phase 5): Connection monitoring, heartbeats, and automatic re-enrollment support
+✅ **Error Types** (Phase 4): Typed error handling with `thiserror` replacing string-based errors
 
 ## Dependencies
 
 - `serde` and `serde_json` for Phase 1 JSON serialization
 - `bincode` for Phase 2 binary serialization (more efficient)
-- `tokio` for async runtime
+- `tokio` for async runtime and Phase 5 connection monitoring
+- `thiserror` for Phase 4 typed error handling
 
 ---
 
@@ -370,22 +366,18 @@ Potential improvements for future phases:
    - Peer selection based on reachability/latency
    - Automatic failover
 
-2. **Address Assignment**
-   - Bootstrap assigns addresses from pool
-   - Member updates RMT with assigned address
-   - Address conflict detection
-
-3. **RIB Synchronization**
-   - Full RIB snapshot transfer
-   - Incremental RIB updates
-   - Neighbor discovery
-
-4. **Security**
+2. **Security**
    - Mutual authentication
    - Encrypted enrollment messages
    - Certificate validation
 
-5. **Performance Optimization**
+3. **Performance Optimization**
    - Reduce polling overhead
    - Batch PDU operations
-   - Connection keep-alive
+
+**Completed in Recent Phases:**
+
+✅ **Address Assignment** (Phase 3): Bootstrap assigns unique addresses from pool
+✅ **RIB Synchronization** (Phase 3): Full RIB snapshot transfer with neighbor discovery
+✅ **Re-enrollment & Keep-alive** (Phase 5): Automatic connection monitoring, heartbeats, and re-enrollment
+✅ **Error Types** (Phase 4): Typed error handling system with `thiserror`
