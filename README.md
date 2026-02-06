@@ -55,10 +55,14 @@ The current documentation is scattered and will be consolidated over time. For n
 - ✅ Dynamic address assignment (Phase 3)
 - ✅ Typed error system with `thiserror` (Phase 4)
 - ✅ Connection monitoring and re-enrollment (Phase 5)
+- ✅ RIB state persistence with disk snapshots (Phase 6)
+- ✅ CDAP incremental synchronization with change log (Phase 6)
+- ✅ Inter-IPCP flow allocation with N-1 layer abstraction (Phase 7a)
+- ✅ Shim trait abstraction for multi-underlay support (Phase 7a)
 
 ### In Progress
-- ⚠️ Inter-IPCP flow allocation
-- ⚠️ CDAP incremental synchronization
+- ⚠️ Multi-underlay support (TCP, QUIC implementations)
+- ⚠️ Peer discovery and automatic neighbor detection
 
 ### Enrollment Implementation
 
@@ -86,7 +90,8 @@ The enrollment protocol is **fully implemented** ✅ with async network communic
 
 #### Future Enhancements (Not Yet Implemented)
 - **Security**: Authentication, encryption, and certificate validation
-- **CDAP Incremental Sync**: Incremental RIB updates instead of full snapshots
+- **Multi-underlay Support**: TCP, QUIC, and other transport protocols via Shim trait
+- **Peer Discovery**: Automatic neighbor detection and dynamic peer management
 - **Multi-peer Bootstrap**: Peer selection, failover, and dynamic discovery
 
 ## License
