@@ -3,7 +3,7 @@ ARI - _A RINA Implementation_ is a Rust implementation of the [Recursive Interne
 
 The acronym 'ARI' is intentionally chosen to reflect both an expanded 'A RINA Implementation' and imply the similarities between networking and ant colonies where the Japanese word for ant, [蟻](https://jisho.org/search/%E8%9F%BB) or mostly written as アリ, is pronounced as 'ari'.
 
-**WARNING**: _The code in this repository has been mostly coded by coding agents backed by large language models (LLMs) and is currently under active development. All of the code has not been thoroughly cross-checked for correctness. It is not production-ready and should be used for educational and experimental purposes only. Use at your own risk_.
+**WARNING**: _The code in this repository has been mostly coded by coding agents backed by large language models (LLMs) and is currently under active development, or, in other words, vibe-coded! All of the code has not been thoroughly cross-checked for correctness. It is not production-ready and should be used for educational and experimental purposes only. Use at your own risk_.
 
 ## Quick Start
 
@@ -32,9 +32,6 @@ The current documentation is scattered and will be consolidated over time. For n
 - **[RUNNING.md](RUNNING.md)** - Quick start and operational guide
 - **[CONFIG-EXAMPLES.md](CONFIG-EXAMPLES.md)** - Comprehensive configuration examples
 - **[CONFIG-SUMMARY.md](CONFIG-SUMMARY.md)** - Implementation details
-- **[ENROLLMENT-PHASES.md](ENROLLMENT-PHASES.md)** - Enrollment implementation guide
-- **[PHASE1-IMPLEMENTATION.md](PHASE1-IMPLEMENTATION.md)** - Phase 1 data path implementation
-- **[PHASE2-IMPLEMENTATION.md](PHASE2-IMPLEMENTATION.md)** - Phase 2 flow creation & data transfer
 
 ## Features
 
