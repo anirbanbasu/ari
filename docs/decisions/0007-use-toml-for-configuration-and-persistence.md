@@ -5,7 +5,7 @@ nav_order: 7
 status: "accepted"
 date: 2026-02-07
 decision-makers:
-    * abasu
+    - abasu
 ---
 # Use TOML for configuration and persistence
 
