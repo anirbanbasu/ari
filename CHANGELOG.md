@@ -6,7 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/) and this 
 
 ## [unreleased]
 
+### Added
+
+- None documented yet.
+
 ### Changed
+
+- None documented yet.
+
+### Deprecated
+
+- None documented yet.
+
+### Removed
+
+- None documented yet.
+
+### Fixed
+
+- None documented yet.
+
+### Security
 
 - None documented yet.
 
