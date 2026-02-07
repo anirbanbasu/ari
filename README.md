@@ -1,6 +1,6 @@
 # ARI
 
-[![Rust tests](https://github.com/anirbanbasu/ari/actions/workflows/rust.yml/badge.svg)](https://github.com/anirbanbasu/ari/actions/workflows/rust.yml)
+[![Rust tests](https://github.com/anirbanbasu/ari/actions/workflows/rust.yml/badge.svg)](https://github.com/anirbanbasu/ari/actions/workflows/rust.yml) [![Markdown Lint](https://github.com/anirbanbasu/ari/actions/workflows/md-lint.yml/badge.svg)](https://github.com/anirbanbasu/ari/actions/workflows/md-lint.yml)
 
 ARI - _A RINA Implementation_ is a Rust implementation of the [Recursive Internetwork Architecture (RINA)](https://en.wikipedia.org/wiki/Recursive_Internetwork_Architecture).
 
