@@ -10,5 +10,5 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/) and this 
 
 - None documented yet.
 
-<!-- Add the comparison link for the "unreleased" section once we have tags for the previous release -->
-[unreleased]: https://github.com/anirbanbasu/ari/
+<!-- Update the comparison link for the "unreleased" section once we have semver tags for the previous release. Until then, let's go with every commit since the initial one. -->
+[unreleased]: https://github.com/anirbanbasu/ari/compare/5dd95416bdc328ab0b82a6b4cf5877f7c5f7d50a...master
