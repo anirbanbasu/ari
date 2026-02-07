@@ -5,11 +5,11 @@ nav_order: 0
 status: "accepted"
 date: 2026-02-07
 decision-makers:
-    - @abasu
+    - abasu
 consulted:
-    - @nacarino
+    - nacarino
 informed:
-    - @nacarino
+    - nacarino
 ---
 
 # Use Markdown Architectural Decision Records

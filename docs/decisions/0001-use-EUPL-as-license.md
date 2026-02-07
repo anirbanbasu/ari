@@ -5,11 +5,11 @@ nav_order: 1
 status: "accepted"
 date: 2026-01-30
 decision-makers:
-    - @abasu
+    - abasu
 consulted:
-    - @nacarino
+    - nacarino
 informed:
-    - @nacarino
+    - nacarino
 ---
 # Choose EUPL as License for ARI
 

@@ -5,11 +5,11 @@ nav_order: 2
 status: "accepted"
 date: 2026-01-31
 decision-makers:
-    - @abasu
+    - abasu
 consulted:
-    - @nacarino
+    - nacarino
 informed:
-    - @nacarino
+    - nacarino
 ---
 # Use Shim layer abstraction for multiple underlay support
 
@@ -17,7 +17,7 @@ informed:
 
 RINA is recursive by definition. However, until we have a RINA-only network stack, we need to support multiple underlays (e.g., UDP, TCP, etc.) for the bottommost DIF to communicate between heterogeneous architectures. Also, this helps us focus on RINA-specific functionality and research explorations with RINA, without being restricted by the choice or the absence of an underlay protocol. To achieve this, we need to decide on an approach to abstract the underlay protocols.
 
-**What is Shim?**: A Shim layer is an abstraction layer that sits between two other layers in a network stack. It provides a consistent interface for the upper layer to interact with the lower layer. The word "shim" originates from the physical world, where a shim is a thin piece of material used to fill gaps or spaces between objects to ensure proper alignment or fit. [Cambridge Dictionary entry for "shim"](https://dictionary.cambridge.org/dictionary/english/shim).
+**What is Shim?**: A Shim layer is an abstraction layer that sits between two other layers in a network stack. It provides a consistent interface for the upper layer to interact with the lower layer. The word "shim" originates from the physical world, where a shim is a thin piece of material used to fill gaps or spaces between objects to ensure proper alignment or fit. See the [Cambridge Dictionary entry for "shim"](https://dictionary.cambridge.org/dictionary/english/shim).
 
 ## Considered Options
 
