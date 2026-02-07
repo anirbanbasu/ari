@@ -4,9 +4,12 @@ nav_order: 1
 # These are optional metadata elements. Feel free to remove any of them.
 status: "accepted"
 date: 2026-01-30
-decision-makers: [@abasu]
-consulted: [@nacarino]
-informed: [@nacarino]
+decision-makers:
+    - @abasu
+consulted:
+    - @nacarino
+informed:
+    - @nacarino
 ---
 # Choose EUPL as License for ARI
 

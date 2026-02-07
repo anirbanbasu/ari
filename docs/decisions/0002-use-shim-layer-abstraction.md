@@ -4,9 +4,12 @@ nav_order: 2
 # These are optional metadata elements. Feel free to remove any of them.
 status: "accepted"
 date: 2026-01-31
-decision-makers: [@abasu]
-consulted: [@nacarino]
-informed: [@nacarino]
+decision-makers:
+    - @abasu
+consulted:
+    - @nacarino
+informed:
+    - @nacarino
 ---
 # Use Shim layer abstraction for multiple underlay support
 
