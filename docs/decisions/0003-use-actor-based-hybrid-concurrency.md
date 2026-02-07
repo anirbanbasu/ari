@@ -15,10 +15,10 @@ RINA components such as Error and Flow Control Protocol (EFCP), Relaying and Mul
 
 ## Considered Options
 
-* Thread-based concurrency model using OS threads
-* Pure async/await model using Rust's async ecosystem (tokio) without actors
-* Actor-based concurrency model using async/await with message-passing channels
-* Hybrid approach: Actor pattern implemented with tokio channels and async tasks
+* Thread-based concurrency model using OS threads.
+* Pure async/await model using Rust's async ecosystem (tokio) without actors.
+* Actor-based concurrency model using async/await with message-passing channels.
+* Hybrid approach: Actor pattern implemented with tokio channels and async tasks.
 
 ## Decision Outcome
 
