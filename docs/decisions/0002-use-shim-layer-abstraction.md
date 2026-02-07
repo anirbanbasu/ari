@@ -58,6 +58,8 @@ Chosen option: "Shim layer abstraction with `Shim` trait to support multiple und
 * Neutral, because it introduces one additional abstraction layer, though with minimal performance overhead.
 * Bad, because the trait must balance generality (supporting diverse transports) with specificity (exposing necessary functionality).
 
-## Conclusion
+## More Information
+
+### Conclusion
 
 We choose the Shim layer abstraction with `Shim` trait to support multiple underlays, with a default UDP implementation (`UdpShim`), to enable flexibility and extensibility in the network stack while maintaining a consistent interface for different underlay protocols. This approach decouples RINA logic from transport details, allowing for easier integration of new underlay protocols (TCP, QUIC, Unix sockets, or even RINA DIFs as N-1 layers) in the future without significant changes to the core architecture. The trait-based design follows Rust best practices and enables compile-time polymorphism for efficient dispatch.

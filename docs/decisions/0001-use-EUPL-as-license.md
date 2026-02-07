@@ -56,7 +56,3 @@ Chosen option: "EUPL v1.2", because this license is compatible with European Uni
 * Good, because it promotes interoperability and sharing within the open-source community.
 * Good, because it has official translations in multiple languages (23, at the time of writing), enhancing its accessibility. See [the EUPL 1.2 text](https://interoperable-europe.ec.europa.eu/collection/eupl/eupl-text-eupl-12).
 * Bad, because it is less known outside of Europe, which may limit its adoption in other regions.
-
-## Conclusion
-
-We choose EUPL v1.2 as the license for ARI to promote open collaboration while ensuring compatibility with European Union law and a wide range of other licenses.

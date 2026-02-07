@@ -61,36 +61,38 @@ Chosen option: "Use only `Create`, `Read`, `Write`, `Delete` for object manipula
 * Bad, because it reduces interoperability with other RINA implementations that expect standard CDAP.
 * Bad, because it eliminates the benefits of standardised distributed object management semantics.
 
-## Current Usage Patterns
+## More Information
+
+### Current Usage Patterns
 
 The implementation establishes the following operation patterns:
 
-### `Create` - Object Creation
+#### `Create` - Object Creation
 
 * **Enrolment requests**: Members send `Create` messages to establish new enrolment relationships with bootstrap IPCPs
 * **RIB object instantiation**: Creating new objects in the distributed RIB during synchronisation
 * **Use case**: Any operation that introduces new state into the distributed system
 
-### `Read` - Query and Synchronisation
+#### `Read` - Query and Synchronisation
 
 * **RIB synchronisation requests**: Members send `Read` operations (via `CdapMessage::new_sync_request`) to query RIB state
 * **Synchronisation responses**: Bootstrap IPCPs respond with `Read` operations containing incremental changes or full snapshots
 * **Object queries**: Retrieving specific RIB object values
 * **Use case**: Non-mutating queries and pulling state updates
 
-### `Write` - State Updates
+#### `Write` - State Updates
 
 * **RIB object updates**: Modifying existing object values
 * **Configuration changes**: Updating distributed configuration parameters
 * **Use case**: Mutating existing state without creating or deleting objects
 
-### `Delete` - Object Removal
+#### `Delete` - Object Removal
 
 * **RIB cleanup**: Removing stale or invalid objects from the distributed RIB
 * **Neighbour disconnection**: Deleting neighbour state when connections are lost
 * **Use case**: Explicitly removing objects from the distributed state
 
-### `Start` and `Stop` - Reserved for Future Use
+#### `Start` and `Stop` - Reserved for Future Use
 
 * Currently return "Operation not yet implemented" in `CdapSession::process_message`
 * **Intended future use cases**:
@@ -99,6 +101,6 @@ The implementation establishes the following operation patterns:
   * Beginning/ending flow allocation procedures
   * Activating/deactivating connection monitoring
 
-## Conclusion
+### Conclusion
 
 We choose to use only the four CRUD-style CDAP operations (`Create`, `Read`, `Write`, `Delete`) for current RIB manipulation and distributed coordination workflows. This decision aligns with the object-oriented nature of enrolment (creating relationships), synchronisation (reading state), updates (writing changes), and cleanup (deleting objects). The `Start` and `Stop` operations remain defined in `CdapOpCode` for RINA specification compliance but are explicitly unimplemented, reserved for future long-running operation management such as continuous synchronisation streams or connection monitoring subscriptions. This approach provides a clear, semantically meaningful protocol surface whilst maintaining flexibility for future enhancements when genuine lifecycle-oriented operations are required.

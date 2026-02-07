@@ -70,6 +70,8 @@ Chosen option: "Hybrid approach: Actor pattern implemented with tokio channels a
 * Neutral, because actors internally use `Arc<RwLock<T>>` for state, but this is hidden from external callers.
 * Bad, because it requires understanding both async/await and the actor pattern, though each individually is well-documented.
 
-## Conclusion
+## More Information
+
+### Conclusion
 
 We choose the hybrid approach of implementing the actor pattern using tokio channels and async tasks for RINA components. This encapsulates state and behaviour within actors (`RibActor`, `EfcpActor`, `RmtActor`, `ShimActor`), eliminating shared state issues whilst leveraging the efficiency of async I/O for network operations. Each actor exposes a typed message interface (`RibMessage`, `EfcpMessage`, etc.) that enforces valid operations at compile time. The implementation uses tokio's `mpsc::channel` for message passing and `tokio::spawn` for running actors as independent tasks. Whilst this requires understanding both async/await and actor patterns, the benefits in terms of scalability, maintainability, type safety, and natural alignment with RINA's message-passing architecture make it the most suitable choice. The approach also enables future enhancements such as distributed actors or actor supervision hierarchies if needed.
