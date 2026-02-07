@@ -1,6 +1,12 @@
 ---
 parent: Decisions
 nav_order: 0
+# These are optional metadata elements. Feel free to remove any of them.
+status: "accepted"
+date: 2026-02-07
+decision-makers: [@abasu]
+consulted: [@nacarino]
+informed: [@nacarino]
 ---
 
 # Use Markdown Architectural Decision Records
