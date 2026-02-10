@@ -34,7 +34,7 @@ pre-commit-update:
 # Upgrade project dependencies using 'cargo'
 upgrade-dependencies:
     @echo "Upgrading project dependencies..."
-    @cargo update
+    @cargo update --verbose
     @echo "Dependencies upgraded."
 
 # Bump the patch version of the project using 'cargo'
