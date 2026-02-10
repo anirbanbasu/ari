@@ -2,7 +2,7 @@
 parent: Decisions
 nav_order: 5
 # These are optional metadata elements. Feel free to remove any of them.
-status: "proposed"
+status: "superseded by ADR-0016"
 date: 2026-02-07
 decision-makers:
     - abasu
