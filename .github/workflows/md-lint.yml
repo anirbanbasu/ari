@@ -39,7 +39,7 @@ jobs:
             - name: Lint CHANGELOG.md
               run: |
                   # Install jbang
-                  JBANG_VERSION=0.136.0 curl -Ls https://sh.jbang.dev | bash -s - app setup
+                  curl -Ls https://raw.githubusercontent.com/jbangdev/jbang/4bcb11945c968cdcb9b1f8a75f246dbc4d00633b/src/main/scripts/jbang | bash -s - app setup
                   export PATH=$PATH:$HOME/.jbang/bin
 
                   # run heylogs verification
