@@ -6,16 +6,16 @@ ARI - _A RINA Implementation_ is a Rust implementation of the [Recursive Interne
 
 The acronym 'ARI' is intentionally chosen to reflect both an expanded 'A RINA Implementation' and imply the similarities between networking and ant colonies where the Japanese word for ant, [蟻](https://jisho.org/search/%E8%9F%BB) or mostly written as アリ, is pronounced as 'ari'.
 
-**WARNING**: _The code in this repository has been mostly coded by coding agents backed by large language models (LLMs) and is currently under active development, or, in other words, vibe-coded! All of the code has not been thoroughly cross-checked for correctness. It is not production-ready and should be used for educational and experimental purposes only. Use at your own risk_.
-
 ## Quick Start
 
 ### Demo Mode
+
 ```bash
 cargo run
 ```
 
 ### Bootstrap IPCP
+
 ```bash
 cargo run -- --config config/bootstrap.toml
 # or
@@ -23,6 +23,7 @@ cargo run -- --mode bootstrap --name ipcp-a --dif-name test-dif --address 1001 -
 ```
 
 ### Member IPCP
+
 ```bash
 cargo run -- --config config/member.toml
 # or
@@ -32,55 +33,60 @@ cargo run -- --mode member --name ipcp-b --dif-name test-dif --bind 0.0.0.0:7001
 ### Documentation
 
 The current documentation is scattered and will be consolidated over time. For now, please refer to the following files.
-- **[RUNNING.md](RUNNING.md)** - Quick start and operational guide
-- **[CONFIG-EXAMPLES.md](CONFIG-EXAMPLES.md)** - Comprehensive configuration examples
-- **[CONFIG-SUMMARY.md](CONFIG-SUMMARY.md)** - Implementation details
+
+* **[RUNNING.md](RUNNING.md)** - Quick start and operational guide
+* **[CONFIG-EXAMPLES.md](CONFIG-EXAMPLES.md)** - Comprehensive configuration examples
+* **[CONFIG-SUMMARY.md](CONFIG-SUMMARY.md)** - Implementation details
 
 ## Features
 
 ### Implemented
-- ✅ Resource Information Base (RIB) with async operations
-- ✅ Common Distributed Application Protocol (CDAP)
-- ✅ Error and Flow Control Protocol (EFCP) with flow creation
-- ✅ Relaying and Multiplexing Task (RMT) with forwarding
-- ✅ UDP/IP Shim Layer with bidirectional communication
-- ✅ Directory Service
-- ✅ Flow Allocator with basic flow API
-- ✅ Enrollment Manager with configurable timeouts
-- ✅ Pluggable Policies (Routing, QoS, Scheduling)
-- ✅ Actor-based concurrent components
-- ✅ Multi-IPCP configuration system
-- ✅ Static routing with hybrid learning
-- ✅ End-to-end data transfer (Phase 2)
-- ✅ Dynamic address assignment (Phase 3)
-- ✅ Typed error system with `thiserror` (Phase 4)
-- ✅ Connection monitoring and re-enrollment (Phase 5)
-- ✅ RIB state persistence with disk snapshots (Phase 6)
-- ✅ CDAP incremental synchronization with change log (Phase 6)
-- ✅ Inter-IPCP flow allocation with N-1 layer abstraction (Phase 7a)
-- ✅ Shim trait abstraction for multi-underlay support (Phase 7a)
+
+* ✅ Resource Information Base (RIB) with async operations
+* ✅ Common Distributed Application Protocol (CDAP)
+* ✅ Error and Flow Control Protocol (EFCP) with flow creation
+* ✅ Relaying and Multiplexing Task (RMT) with forwarding
+* ✅ UDP/IP Shim Layer with bidirectional communication
+* ✅ Directory Service
+* ✅ Flow Allocator with basic flow API
+* ✅ Enrollment Manager with configurable timeouts
+* ✅ Pluggable Policies (Routing, QoS, Scheduling)
+* ✅ Actor-based concurrent components
+* ✅ Multi-IPCP configuration system
+* ✅ Static routing with hybrid learning
+* ✅ End-to-end data transfer (Phase 2)
+* ✅ Dynamic address assignment (Phase 3)
+* ✅ Typed error system with `thiserror` (Phase 4)
+* ✅ Connection monitoring and re-enrollment (Phase 5)
+* ✅ RIB state persistence with disk snapshots (Phase 6)
+* ✅ CDAP incremental synchronization with change log (Phase 6)
+* ✅ Inter-IPCP flow allocation with N-1 layer abstraction (Phase 7a)
+* ✅ Shim trait abstraction for multi-underlay support (Phase 7a)
 
 ### In Progress
-- ⚠️ Multi-underlay support (TCP, QUIC implementations)
-- ⚠️ Peer discovery and automatic neighbor detection
+
+* ⚠️ Multi-underlay support (TCP, QUIC implementations)
+* ⚠️ Peer discovery and automatic neighbor detection
 
 ### Enrollment Implementation
 
 The enrollment protocol is **fully implemented** ✅ with async network communication, dynamic address assignment, and automatic re-enrollment:
 
 #### Core Features (Implemented)
-- **Fully Async**: tokio-based async/await throughout the enrollment flow
-- **Timeout & Retry**: Configurable timeout per attempt with exponential backoff
-- **Binary Protocol**: Efficient bincode serialization for CDAP messages over PDUs
-- **Dynamic Address Assignment**: Bootstrap allocates addresses from configurable pool (Phase 3)
-- **Address Mapping**: Dynamic RINA ↔ socket address translation with auto-registration
-- **RIB Synchronization**: Full RIB snapshot transfer during enrollment
-- **Bidirectional**: Handles both member-initiated requests and bootstrap responses
-- **Typed Errors**: Structured error handling with `thiserror` (Phase 4)
-- **Connection Monitoring**: Heartbeat-based health tracking (Phase 5)
-- **Automatic Re-enrollment**: Recovers from temporary network failures (Phase 5)
+
+* **Fully Async**: tokio-based async/await throughout the enrollment flow
+* **Timeout & Retry**: Configurable timeout per attempt with exponential backoff
+* **Binary Protocol**: Efficient bincode serialization for CDAP messages over PDUs
+* **Dynamic Address Assignment**: Bootstrap allocates addresses from configurable pool (Phase 3)
+* **Address Mapping**: Dynamic RINA ↔ socket address translation with auto-registration
+* **RIB Synchronization**: Full RIB snapshot transfer during enrollment
+* **Bidirectional**: Handles both member-initiated requests and bootstrap responses
+* **Typed Errors**: Structured error handling with `thiserror` (Phase 4)
+* **Connection Monitoring**: Heartbeat-based health tracking (Phase 5)
+* **Automatic Re-enrollment**: Recovers from temporary network failures (Phase 5)
 
 #### Enrollment Flow
+
 1. **Member IPCP**: Initiates enrollment by sending CDAP CREATE message via UDP PDU
 2. **Bootstrap IPCP**: Receives request, allocates address from pool, sends response with RIB snapshot
 3. **Member IPCP**: Receives assigned address, synchronizes RIB, stores DIF name
@@ -89,10 +95,11 @@ The enrollment protocol is **fully implemented** ✅ with async network communic
 6. **Connection Monitoring**: Background task monitors heartbeat and triggers re-enrollment if needed
 
 #### Future Enhancements (Not Yet Implemented)
-- **Security**: Authentication, encryption, and certificate validation
-- **Multi-underlay Support**: TCP, QUIC, and other transport protocols via Shim trait
-- **Peer Discovery**: Automatic neighbor detection and dynamic peer management
-- **Multi-peer Bootstrap**: Peer selection, failover, and dynamic discovery
+
+* **Security**: Authentication, encryption, and certificate validation
+* **Multi-underlay Support**: TCP, QUIC, and other transport protocols via Shim trait
+* **Peer Discovery**: Automatic neighbor detection and dynamic peer management
+* **Multi-peer Bootstrap**: Peer selection, failover, and dynamic discovery
 
 ## License
 
