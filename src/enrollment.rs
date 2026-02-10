@@ -290,7 +290,7 @@ impl EnrollmentManager {
             obj_name: ipcp_name.clone(),
             obj_class: Some("enrollment".to_string()),
             obj_value: Some(RibValue::Bytes(
-                bincode::serialize(&request)
+                postcard::to_allocvec(&request)
                     .map_err(|e| EnrollmentError::SerializationFailed(e.to_string()))?,
             )),
             invoke_id: 1,
@@ -300,8 +300,8 @@ impl EnrollmentManager {
             sync_response: None,
         };
 
-        // Serialize CDAP message with bincode
-        let cdap_bytes = bincode::serialize(&cdap_msg)
+        // Serialize CDAP message with postcard
+        let cdap_bytes = postcard::to_allocvec(&cdap_msg)
             .map_err(|e| EnrollmentError::SerializationFailed(e.to_string()))?;
 
         // Create PDU with CDAP payload
@@ -334,7 +334,7 @@ impl EnrollmentManager {
                 ))?;
 
         let enroll_response: EnrollmentResponse = match response_bytes {
-            RibValue::Bytes(bytes) => bincode::deserialize(bytes)
+            RibValue::Bytes(bytes) => postcard::from_bytes(bytes)
                 .map_err(|e| EnrollmentError::DeserializationFailed(e.to_string()))?,
             RibValue::String(s) => {
                 // Legacy support for old string-based responses
@@ -430,7 +430,7 @@ impl EnrollmentManager {
             sync_response: None,
         };
 
-        let cdap_bytes = bincode::serialize(&cdap_msg)
+        let cdap_bytes = postcard::to_allocvec(&cdap_msg)
             .map_err(|e| EnrollmentError::SerializationFailed(e.to_string()))?;
 
         let pdu = Pdu::new_data(self.local_addr, bootstrap_addr, 0, 0, 0, cdap_bytes);
@@ -483,7 +483,7 @@ impl EnrollmentManager {
                 .map_err(|e| EnrollmentError::ReceiveFailed(e.to_string()))?
             {
                 // Deserialize CDAP message from PDU payload
-                let cdap_msg: CdapMessage = bincode::deserialize(&pdu.payload)
+                let cdap_msg: CdapMessage = postcard::from_bytes(&pdu.payload)
                     .map_err(|e| EnrollmentError::DeserializationFailed(e.to_string()))?;
 
                 // If expected_class is specified, filter by it
@@ -559,7 +559,7 @@ impl EnrollmentManager {
         );
 
         // Serialize and send
-        let cdap_bytes = bincode::serialize(&cdap_msg)
+        let cdap_bytes = postcard::to_allocvec(&cdap_msg)
             .map_err(|e| EnrollmentError::SerializationFailed(e.to_string()))?;
 
         let pdu = Pdu::new_data(
@@ -579,7 +579,7 @@ impl EnrollmentManager {
         let response_pdu = self.receive_sync_response().await?;
 
         // Deserialize CDAP response
-        let cdap_response: CdapMessage = bincode::deserialize(&response_pdu.payload)
+        let cdap_response: CdapMessage = postcard::from_bytes(&response_pdu.payload)
             .map_err(|e| EnrollmentError::DeserializationFailed(e.to_string()))?;
 
         // Process sync response
@@ -640,7 +640,7 @@ impl EnrollmentManager {
 
             if let Ok(Some((pdu, _src_addr))) = self.shim.receive_pdu() {
                 // Check if it's a sync response (contains sync_response field)
-                if let Ok(cdap_msg) = bincode::deserialize::<CdapMessage>(&pdu.payload)
+                if let Ok(cdap_msg) = postcard::from_bytes::<CdapMessage>(&pdu.payload)
                     && cdap_msg.sync_response.is_some()
                 {
                     return Ok(pdu);
@@ -661,7 +661,7 @@ impl EnrollmentManager {
         self.shim.register_peer(pdu.src_addr, src_socket_addr);
 
         // Deserialize CDAP message from PDU payload
-        let cdap_msg: CdapMessage = bincode::deserialize(&pdu.payload)
+        let cdap_msg: CdapMessage = postcard::from_bytes(&pdu.payload)
             .map_err(|e| EnrollmentError::DeserializationFailed(e.to_string()))?;
 
         // Check if this is an enrollment request
@@ -675,7 +675,7 @@ impl EnrollmentManager {
 
         // Extract enrollment request
         let enroll_request: EnrollmentRequest = match &cdap_msg.obj_value {
-            Some(RibValue::Bytes(bytes)) => bincode::deserialize(bytes)
+            Some(RibValue::Bytes(bytes)) => postcard::from_bytes(bytes)
                 .map_err(|e| EnrollmentError::DeserializationFailed(e.to_string()))?,
             Some(RibValue::String(name)) => {
                 // Legacy support for old string-based requests
@@ -819,7 +819,7 @@ impl EnrollmentManager {
         request_cdap: &CdapMessage,
     ) -> Result<(), EnrollmentError> {
         // Serialize enrollment response
-        let response_bytes = bincode::serialize(response)
+        let response_bytes = postcard::to_allocvec(response)
             .map_err(|e| EnrollmentError::SerializationFailed(e.to_string()))?;
 
         // Create CDAP response message
@@ -836,7 +836,7 @@ impl EnrollmentManager {
         };
 
         // Serialize CDAP response
-        let cdap_bytes = bincode::serialize(&cdap_response)
+        let cdap_bytes = postcard::to_allocvec(&cdap_response)
             .map_err(|e| EnrollmentError::SerializationFailed(e.to_string()))?;
 
         // Create response PDU
@@ -864,7 +864,7 @@ impl EnrollmentManager {
         src_socket_addr: SocketAddr,
     ) -> Result<(), EnrollmentError> {
         // Deserialize CDAP message from PDU payload
-        let cdap_msg: CdapMessage = bincode::deserialize(&pdu.payload)
+        let cdap_msg: CdapMessage = postcard::from_bytes(&pdu.payload)
             .map_err(|e| EnrollmentError::DeserializationFailed(e.to_string()))?;
 
         // Route based on operation type and object class
@@ -907,7 +907,7 @@ impl EnrollmentManager {
             sync_response: None,
         };
 
-        let response_bytes = bincode::serialize(&response)
+        let response_bytes = postcard::to_allocvec(&response)
             .map_err(|e| EnrollmentError::SerializationFailed(e.to_string()))?;
 
         let response_pdu = Pdu::new_data(self.local_addr, pdu.src_addr, 0, 0, 0, response_bytes);
@@ -981,7 +981,7 @@ impl EnrollmentManager {
         };
 
         // Serialize and send response
-        let response_bytes = bincode::serialize(&response)
+        let response_bytes = postcard::to_allocvec(&response)
             .map_err(|e| EnrollmentError::SerializationFailed(e.to_string()))?;
 
         let response_pdu = Pdu::new_data(

@@ -422,8 +422,8 @@ impl Rib {
         // Collect all objects into a vector
         let all_objects: Vec<RibObject> = objects.values().cloned().collect();
 
-        // Serialize using bincode
-        bincode::serialize(&all_objects).unwrap_or_else(|e| {
+        // Serialize using postcard
+        postcard::to_allocvec(&all_objects).unwrap_or_else(|e| {
             eprintln!("Failed to serialize RIB: {}", e);
             Vec::new()
         })
@@ -431,7 +431,7 @@ impl Rib {
 
     /// Deserializes a RIB snapshot and merges it into this RIB
     ///
-    /// Uses bincode for deserialization
+    /// Uses postcard for deserialization
     ///
     /// # Arguments
     /// * `data` - Serialized RIB data
@@ -444,9 +444,9 @@ impl Rib {
             return Ok(0);
         }
 
-        // Deserialize using bincode
+        // Deserialize using postcard
         let objects: Vec<RibObject> =
-            bincode::deserialize(data).map_err(|e| format!("Failed to deserialize RIB: {}", e))?;
+            postcard::from_bytes(data).map_err(|e| format!("Failed to deserialize RIB: {}", e))?;
 
         // Merge objects into RIB
         let count = self.merge_objects(objects).await;
@@ -965,7 +965,7 @@ mod tests {
 
         // Create another RIB with the old version
         let rib2 = Rib::new();
-        rib2.deserialize(&bincode::serialize(&vec![obj_v1]).unwrap())
+        rib2.deserialize(&postcard::to_allocvec(&vec![obj_v1]).unwrap())
             .await
             .unwrap();
 

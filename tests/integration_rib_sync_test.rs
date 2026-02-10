@@ -236,10 +236,10 @@ async fn test_cdap_sync_message_serialization() {
         "member-1".to_string(), // requester
     );
 
-    let serialized = bincode::serialize(&sync_req).unwrap();
+    let serialized = postcard::to_allocvec(&sync_req).unwrap();
     println!("✓ SyncRequest serialized: {} bytes", serialized.len());
 
-    let deserialized: CdapMessage = bincode::deserialize(&serialized).unwrap();
+    let deserialized: CdapMessage = postcard::from_bytes(&serialized).unwrap();
     assert!(
         deserialized.sync_request.is_some(),
         "Should have sync_request"
@@ -270,14 +270,14 @@ async fn test_cdap_sync_message_serialization() {
         None,                  // no error
     );
 
-    let serialized = bincode::serialize(&sync_resp).unwrap();
+    let serialized = postcard::to_allocvec(&sync_resp).unwrap();
     println!(
         "✓ SyncResponse (incremental) serialized: {} bytes",
         serialized.len()
     );
 
     // Test deserializing - this might fail with complex nested structures
-    match bincode::deserialize::<CdapMessage>(&serialized) {
+    match postcard::from_bytes::<CdapMessage>(&serialized) {
         Ok(deserialized) => {
             assert!(
                 deserialized.sync_response.is_some(),
@@ -310,13 +310,13 @@ async fn test_cdap_sync_message_serialization() {
         None,                   // no error
     );
 
-    let serialized = bincode::serialize(&sync_resp_full).unwrap();
+    let serialized = postcard::to_allocvec(&sync_resp_full).unwrap();
     println!(
         "✓ SyncResponse (full) serialized: {} bytes",
         serialized.len()
     );
 
-    match bincode::deserialize::<CdapMessage>(&serialized) {
+    match postcard::from_bytes::<CdapMessage>(&serialized) {
         Ok(deserialized) => {
             let resp = deserialized.sync_response.unwrap();
             assert!(resp.full_snapshot.is_some(), "Should have full_snapshot");
@@ -337,8 +337,8 @@ async fn test_cdap_sync_message_serialization() {
         Some("Version too old".to_string()), // error
     );
 
-    let serialized = bincode::serialize(&sync_resp_err).unwrap();
-    match bincode::deserialize::<CdapMessage>(&serialized) {
+    let serialized = postcard::to_allocvec(&sync_resp_err).unwrap();
+    match postcard::from_bytes::<CdapMessage>(&serialized) {
         Ok(deserialized) => {
             let resp = deserialized.sync_response.unwrap();
             assert!(resp.error.is_some(), "Should have error");
@@ -385,7 +385,7 @@ async fn test_bandwidth_comparison() {
 
     // Compare sizes
     let changes = rib.get_changes_since(initial_version).await.unwrap();
-    let incremental_bytes = bincode::serialize(&changes).unwrap();
+    let incremental_bytes = postcard::to_allocvec(&changes).unwrap();
 
     println!("\n--- Bandwidth Comparison ---");
     println!("  Changes made: 5");

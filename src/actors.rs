@@ -420,7 +420,7 @@ impl ShimActor {
                         let shim = shim.read().await;
                         if let Ok(Some((pdu_bytes, src))) = shim.recv_from() {
                             // Deserialize PDU
-                            match bincode::deserialize::<Pdu>(&pdu_bytes) {
+                            match postcard::from_bytes::<Pdu>(&pdu_bytes) {
                                 Ok(pdu) => {
                                     println!("📥 Received PDU from {} → dst:{} ({}bytes)",
                                         src, pdu.dst_addr, pdu_bytes.len());

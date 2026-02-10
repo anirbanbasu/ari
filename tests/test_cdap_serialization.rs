@@ -3,7 +3,7 @@ use ari::cdap::{CdapMessage, CdapOpCode};
 use ari::rib::RibValue;
 
 #[test]
-fn test_cdap_message_bincode_roundtrip() {
+fn test_cdap_message_postcard_roundtrip() {
     let msg = CdapMessage::new_request(
         CdapOpCode::Create,
         "test_object".to_string(),
@@ -12,12 +12,12 @@ fn test_cdap_message_bincode_roundtrip() {
         42,
     );
 
-    // Serialize with bincode
-    let serialized = bincode::serialize(&msg).expect("Serialization should succeed");
+    // Serialize with postcard
+    let serialized = postcard::to_allocvec(&msg).expect("Serialization should succeed");
 
-    // Deserialize with bincode
+    // Deserialize with postcard
     let deserialized: CdapMessage =
-        bincode::deserialize(&serialized).expect("Deserialization should succeed");
+        postcard::from_bytes(&serialized).expect("Deserialization should succeed");
 
     // Verify fields
     assert_eq!(deserialized.op_code, msg.op_code);

@@ -178,14 +178,14 @@ impl Pdu {
         self.pdu_type == PduType::Management
     }
 
-    /// Serializes the PDU to bytes using bincode
+    /// Serializes the PDU to bytes using postcard
     pub fn serialize(&self) -> Result<Vec<u8>, String> {
-        bincode::serialize(self).map_err(|e| format!("Failed to serialize PDU: {}", e))
+        postcard::to_allocvec(self).map_err(|e| format!("Failed to serialize PDU: {}", e))
     }
 
-    /// Deserializes a PDU from bytes using bincode
+    /// Deserializes a PDU from bytes using postcard
     pub fn deserialize(data: &[u8]) -> Result<Self, String> {
-        bincode::deserialize(data).map_err(|e| format!("Failed to deserialize PDU: {}", e))
+        postcard::from_bytes(data).map_err(|e| format!("Failed to deserialize PDU: {}", e))
     }
 }
 

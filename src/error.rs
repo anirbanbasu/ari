@@ -234,8 +234,8 @@ pub enum CdapError {
 /// Serialization/deserialization errors
 #[derive(Error, Debug)]
 pub enum SerializationError {
-    #[error("Bincode serialization failed: {0}")]
-    BincodeSerialization(#[from] bincode::Error),
+    #[error("Postcard serialization failed: {0}")]
+    PostcardSerialization(#[from] postcard::Error),
 
     #[error("JSON serialization failed: {0}")]
     JsonSerialization(#[from] serde_json::Error),
