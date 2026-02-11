@@ -50,7 +50,6 @@ jobs:
         with:
           scan-args: |-
             -r
-            --skip-git
             --format sarif
             ./
 
@@ -84,7 +83,6 @@ jobs:
         with:
           scan-args: |-
             -r
-            --skip-git
             --format sarif
             ./
         continue-on-error: true
