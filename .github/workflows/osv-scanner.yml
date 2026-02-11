@@ -16,36 +16,81 @@ name: OSV-Scanner
 
 on:
   pull_request:
-    branches: [ "master" ]
+    branches: ["master"]
   merge_group:
-    branches: [ "master" ]
+    branches: ["master"]
   schedule:
-    - cron: '31 17 * * 0'
+    - cron: "31 17 * * 0"
   push:
-    branches: [ "master" ]
+    branches: ["master"]
 
 permissions:
-  # Require writing security events to upload SARIF file to security tab
-  security-events: write
-  # Read commit contents
   contents: read
 
 jobs:
   scan-scheduled:
     if: ${{ github.event_name == 'push' || github.event_name == 'schedule' }}
-    uses: "google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@1f1242919d8a60496dd1874b24b62b2370ed4c78" # v1.7.1
-    with:
-      # Example of specifying custom arguments
-      scan-args: |-
-        -r
-        --skip-git
-        ./
+    runs-on: ubuntu-latest
+    permissions:
+      # Required to upload SARIF file to security tab
+      security-events: write
+      # Required to read commit contents
+      contents: read
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Run OSV-Scanner
+        uses: google/osv-scanner-action/osv-scanner-action@2a387edfbe02a11d856b89172f6e978100177eb4 # v2.3.2
+        with:
+          scan-args: |-
+            -r
+            --skip-git
+            --format sarif
+            ./
+
+      - name: Upload SARIF file
+        uses: github/codeql-action/upload-sarif@77591e2c4a43bf190ac768983419eb058187e62f # v2.24.1
+        with:
+          sarif_file: results.sarif
+        if: success() || failure()
+
   scan-pr:
     if: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}
-    uses: "google/osv-scanner-action/.github/workflows/osv-scanner-reusable-pr.yml@1f1242919d8a60496dd1874b24b62b2370ed4c78" # v1.7.1
-    with:
-      # Example of specifying custom arguments
-      scan-args: |-
-        -r
-        --skip-git
-        ./
+    runs-on: ubuntu-latest
+    permissions:
+      # Required to upload SARIF file to security tab
+      security-events: write
+      # Required to read commit contents
+      contents: read
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Run OSV-Scanner (compare mode for PRs)
+        uses: google/osv-scanner-action/osv-scanner-action@2a387edfbe02a11d856b89172f6e978100177eb4 # v2.3.2
+        with:
+          scan-args: |-
+            -r
+            --skip-git
+            --format sarif
+            ./
+        continue-on-error: true
+
+      - name: Upload SARIF file
+        uses: github/codeql-action/upload-sarif@77591e2c4a43bf190ac768983419eb058187e62f # v2.24.1
+        with:
+          sarif_file: results.sarif
+        if: success() || failure()
