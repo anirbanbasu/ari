@@ -1,3 +1,9 @@
+# SPDX-License-Identifier: EUPL-1.2-or-later
+# Copyright © 2026-present ARI Contributors
+#
+# For most projects, this workflow file will not need changing; you simply need
+# to commit it to your repository.
+#
 # To get started with Dependabot version updates, you'll need to specify which
 # package ecosystems to update and where the package manifests are located.
 # Please see the documentation for all configuration options:
@@ -7,5 +13,10 @@ version: 2
 updates:
   - package-ecosystem: "cargo" # See documentation for possible values
     directory: "/" # Location of package manifests
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
     schedule:
       interval: "weekly"
