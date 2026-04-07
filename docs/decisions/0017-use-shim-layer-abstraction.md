@@ -1,6 +1,6 @@
 ---
 parent: Decisions
-nav_order: 2
+nav_order: 17
 # These are optional metadata elements. Feel free to remove any of them.
 status: "Proposed"
 date: 2026-04-07
@@ -21,9 +21,9 @@ RINA is recursive by definition. Until we have a RINA-only network stack, we nee
 
 ## Considered Options
 
-* Implement a full RINA-only network stack from the beginning
-* Implement a single underlay on some existing network infrastructure stack
-* Shim layer abstraction with `Shim` trait to support multiple underlays
+* Implement a full RINA-only network stack from the beginning.
+* Implement a single underlay on some existing network infrastructure stack.
+* Shim layer abstraction with `Shim` trait to support multiple underlays.
 
 ## Decision Outcome
 
@@ -33,11 +33,11 @@ Chosen option: "Shim layer abstraction with `Shim` trait to support multiple und
 
 ### Implement a full RINA-only network stack from the beginning
 
-* Good, because it would lead towards a complete RINA implementation
-* Good, because it would lead to a clean RINA implementation that has few kludges with existing network stacks
-* Bad, because a full implementation would take too long to develop
-* Bad, because only nodes with full RINA-only networks stacks would be connected, disregarding existing network infrastructure
-* Bad, because we would postpone thinking about having to connect the RINA network to existing network infrastructure
+* Good, because it would lead towards a complete RINA implementation.
+* Good, because it would lead to a clean RINA implementation that has few kludges with existing network stacks.
+* Bad, because a full implementation would take too long to develop.
+* Bad, because only nodes with full RINA-only networks stacks would be connected, disregarding existing network infrastructure.
+* Bad, because we would postpone thinking about having to connect the RINA network to existing network infrastructure.
 
 ### Implement a single underlay on some existing network infrastructure stack
 
