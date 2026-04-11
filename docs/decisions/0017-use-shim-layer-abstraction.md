@@ -2,7 +2,7 @@
 parent: Decisions
 nav_order: 17
 # These are optional metadata elements. Feel free to remove any of them.
-status: "Accepted"
+status: "accepted"
 date: 2026-04-07
 decision-makers:
     - abasu
