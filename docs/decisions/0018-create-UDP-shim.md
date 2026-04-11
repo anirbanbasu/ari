@@ -2,7 +2,7 @@
 parent: Decisions
 nav_order: 18
 # These are optional metadata elements. Feel free to remove any of them.
-status: "Proposed"
+status: "Accepted"
 date: 2026-04-07
 decision-makers:
     - abasu
@@ -15,15 +15,15 @@ informed:
 
 ## Context and Problem Statement
 
-With the decision of utilizing a Shim layer for abstracting the RINA layer and existing network layers, it is necessary to pick a widely used networking technology to abstract via a shim. There a lot of existing network protocols which could be utilized to connect the RINA layer to existing network infrastructure. A decision is required as to which network infrastructure to initially develop and support.
+With the decision of utilizing a shim layer for connecting the RINA layer with existing network layers, it is necessary to pick a starting widely used networking technology to implement as a shim. There a lot of existing network protocols which could be utilized to connect the RINA layer to existing network infrastructure. A decision is required as to which network infrastructure to initially develop and support.
 
-It has been decided that we will limit considerations to protocols that can be easily accessed within operating system userland and that can be easily found on Microsoft Windows, mac OS and GNU/Linux operating systems.
+It was previously decided that we will limit consideration to protocols that can be easily accessed within operating system userland and that can be easily found on Microsoft Windows, macOS and GNU/Linux operating systems.
 
 ## Considered Options
 
-* UDP.
-* TCP.
-* QUIC.
+* UDP (User Datagram Protocol).
+* TCP (Transmission Control Protocol).
+* QUIC (Quick UDP Internet Connections).
 
 ## Decision Outcome
 
